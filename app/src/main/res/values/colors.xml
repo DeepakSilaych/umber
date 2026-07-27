@@ -2,7 +2,8 @@
 <resources>
     <color name="surface">#FBFDF8</color>
     <color name="widget_surface">#F2F4EF</color>
-    <color name="launcher_background">#1F6E43</color>
+    <!-- Umber. Matches docs/logo.svg. -->
+    <color name="launcher_background">#6B4226</color>
 
     <!--
       Widget palette. Glance 1.1 has no day/night ColorProvider factory, so light/dark is expressed

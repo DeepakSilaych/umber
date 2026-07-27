@@ -1,4 +1,21 @@
-# Umber
+<p align="center">
+  <img src="docs/logo.png" alt="Umber" width="120" height="120">
+</p>
+
+<h1 align="center">Umber</h1>
+
+<p align="center">
+  <em>Your bank already texts you every transaction.<br>This turns those into a spending tracker that never leaves your phone.</em>
+</p>
+
+<p align="center">
+  <a href="../../releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/DeepakSilaych/umber?style=flat-square&color=8C5A34"></a>
+  <img alt="Android 8.0+" src="https://img.shields.io/badge/Android-8.0%2B-8C5A34?style=flat-square">
+  <img alt="No internet permission" src="https://img.shields.io/badge/INTERNET-not%20requested-4E2F1B?style=flat-square">
+  <a href="LICENSE"><img alt="MIT" src="https://img.shields.io/badge/licence-MIT-8C5A34?style=flat-square"></a>
+</p>
+
+---
 
 An offline Android expense tracker for India. It reads bank and UPI SMS, categorises spending with
 a model that trains on your own corrections, and puts rolling 24-hour / 7-day / 30-day totals on
