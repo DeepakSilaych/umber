@@ -76,6 +76,9 @@ android {
 
     buildFeatures {
         compose = true
+        // Only so Settings can show the running version. Without it there is no way for the app to
+        // tell the user which build they have, which makes bug reports guesswork.
+        buildConfig = true
     }
 
     packaging {

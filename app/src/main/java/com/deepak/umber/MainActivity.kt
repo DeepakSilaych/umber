@@ -1,7 +1,9 @@
 package com.deepak.umber
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -39,6 +41,8 @@ import com.deepak.umber.ui.home.HomeScreen
 import com.deepak.umber.ui.review.ReviewScreen
 import com.deepak.umber.ui.settings.SettingsScreen
 import com.deepak.umber.ui.theme.UmberTheme
+
+private const val RELEASES_URL = "https://github.com/DeepakSilaych/umber/releases/latest"
 
 private enum class Tab(val label: String) {
     HOME("Home"),
@@ -220,6 +224,18 @@ private fun AppScaffold(container: AppContainer) {
                 onImportStatement = { statementPicker.launch(arrayOf("*/*")) },
                 onExportCsv = { ledgerExporter.launch("ledger-export.csv") },
                 onImportCsv = { ledgerPicker.launch(arrayOf("*/*")) },
+                versionName = BuildConfig.VERSION_NAME,
+                // Handing the URL to a browser needs no INTERNET permission of our own — the
+                // browser does the networking. It's the only update check possible without
+                // giving this app network access, which would defeat the point of it.
+                onCheckUpdates = {
+                    runCatching {
+                        context.startActivity(
+                            Intent(Intent.ACTION_VIEW, Uri.parse(RELEASES_URL))
+                                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                        )
+                    }
+                },
                 modifier = Modifier.padding(padding),
             )
         }

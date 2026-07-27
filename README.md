@@ -77,6 +77,36 @@ to learn from.
 > sideloading. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#ingestion-sources) for the
 > notification-based path that would be needed for Play distribution.
 
+## Staying up to date
+
+Umber cannot check for updates itself — it has no network access, which is the whole point. Two
+ways to hear about new versions:
+
+- **[Obtainium](https://github.com/ImranR98/Obtainium)** — point it at
+  `https://github.com/DeepakSilaych/umber` and it watches Releases, notifies you, and installs
+  updates in one tap. This is the closest thing to an update popup, and the recommended route.
+- **Watch → Custom → Releases** on this repo for an email whenever a version ships.
+
+Settings → About also shows your running version and a **Check for updates** button, which opens
+the releases page in your browser. The browser does the networking; Umber never touches it.
+
+## Permissions
+
+What the built APK actually requests, verified with `aapt2 dump permissions`:
+
+| Permission | Why |
+|---|---|
+| `RECEIVE_SMS`, `READ_SMS` | The only source of transaction data. |
+| `ACCESS_COARSE_LOCATION`, `ACCESS_FINE_LOCATION` | Optional. Foreground only — never background. |
+| `WAKE_LOCK`, `FOREGROUND_SERVICE`, `RECEIVE_BOOT_COMPLETED`, `ACCESS_NETWORK_STATE` | Merged in by WorkManager, which runs the widget refresh. Not requested by this app's manifest. |
+
+**`INTERNET` is absent.** `ACCESS_NETWORK_STATE` allows *observing* connectivity, not using it —
+without `INTERNET` the process cannot open a socket at all. Verify it yourself:
+
+```bash
+aapt2 dump permissions umber-0.1.1.apk | grep INTERNET   # no output
+```
+
 ## Build from source
 
 Requires **JDK 17** and the **Android SDK** (API 35).

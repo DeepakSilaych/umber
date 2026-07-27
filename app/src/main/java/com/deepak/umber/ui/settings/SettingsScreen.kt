@@ -43,6 +43,8 @@ fun SettingsScreen(
     onImportStatement: () -> Unit,
     onExportCsv: () -> Unit,
     onImportCsv: () -> Unit,
+    versionName: String,
+    onCheckUpdates: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -247,6 +249,35 @@ fun SettingsScreen(
                         "location data never leave this device — there is no server to send them to.",
                     style = MaterialTheme.typography.bodySmall,
                 )
+            }
+        }
+
+        Card {
+            Column(Modifier.padding(14.dp)) {
+                Text("About", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.height(8.dp))
+                Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = "Version",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Text(versionName, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+                }
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    // Being upfront about why there's no automatic update prompt: the same missing
+                    // permission that guarantees the privacy claim also rules one out.
+                    "Umber can't check for updates on its own — it has no internet permission. " +
+                        "This opens the releases page in your browser.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(10.dp))
+                OutlinedButton(onClick = onCheckUpdates, modifier = Modifier.fillMaxWidth()) {
+                    Text("Check for updates")
+                }
             }
         }
 
