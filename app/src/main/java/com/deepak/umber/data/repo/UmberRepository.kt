@@ -48,6 +48,36 @@ data class WindowSummary(
     val topCategory: CategoryTotal?,
 )
 
+/**
+ * Everything the home-screen widget renders, gathered in one call.
+ *
+ * Assembled in the repository rather than the widget so `provideGlance` has a single failure point
+ * to guard: a query that throws there leaves a permanently broken widget on the home screen with no
+ * obvious way to retry.
+ */
+data class WidgetSnapshot(
+    val summaries: Map<SpendWindow, WindowSummary>,
+    val daily: List<Long>,
+    val topCategories: List<CategoryTotal>,
+    val reviewCount: Int,
+    val totalCount: Int,
+    val previousWeekPaise: Long,
+) {
+    /** "Nothing spent" and "nothing imported" deserve very different messages. */
+    val isEmpty: Boolean get() = totalCount == 0
+
+    /**
+     * Percentage change over the last 7 days versus the 7 before it, or null when there is no
+     * baseline to compare against — showing "+100%" against a week of zero spending is noise.
+     */
+    val weekTrendPercent: Int?
+        get() {
+            val current = summaries[SpendWindow.LAST_7D]?.spentPaise ?: return null
+            if (previousWeekPaise <= 0L) return null
+            return (((current - previousWeekPaise) * 100.0) / previousWeekPaise).toInt()
+        }
+}
+
 class UmberRepository(
     private val db: AppDatabase,
     private val classifier: Classifier,
@@ -105,6 +135,23 @@ class UmberRepository(
             incomePaise = db.txns().sumCategoryIn(Direction.CREDIT, Categories.INCOME, from, now),
             txnCount = db.txns().countIn(Direction.DEBIT, from, now),
             topCategory = top,
+        )
+    }
+
+    /** Net spend between two instants, after reimbursement netting. */
+    suspend fun netSpendBetween(from: Long, to: Long): Long = netting(from, to).netPaise
+
+    suspend fun widgetSnapshot(now: Long = System.currentTimeMillis()): WidgetSnapshot {
+        val week = SpendWindow.LAST_7D.durationMs
+        return WidgetSnapshot(
+            summaries = SpendWindow.entries.associateWith { summary(it, now) },
+            daily = dailySeries(days = 30, now = now),
+            topCategories = topCategories(SpendWindow.LAST_30D, limit = 3, now = now),
+            reviewCount = db.txns().needingReviewCountNow(),
+            totalCount = db.txns().totalCountNow(),
+            // The 7 days before the current 7, so the figure has a reference point rather than
+            // being a number with nothing to compare it to.
+            previousWeekPaise = netSpendBetween(now - 2 * week, now - week),
         )
     }
 

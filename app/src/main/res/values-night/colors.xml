@@ -7,4 +7,5 @@
     <color name="widget_muted">#8F9199</color>
     <color name="widget_accent">#FFB4AB</color>
     <color name="widget_bar">#45474E</color>
+    <color name="widget_positive">#7BC47F</color>
 </resources>

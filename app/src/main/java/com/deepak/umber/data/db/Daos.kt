@@ -189,6 +189,13 @@ interface TxnDao {
     @Query("SELECT COUNT(*) FROM txn WHERE needsReview = 1")
     fun needingReviewCount(): Flow<Int>
 
+    /** One-shot variants: the widget renders outside any Flow collection. */
+    @Query("SELECT COUNT(*) FROM txn WHERE needsReview = 1")
+    suspend fun needingReviewCountNow(): Int
+
+    @Query("SELECT COUNT(*) FROM txn")
+    suspend fun totalCountNow(): Int
+
     @Query("SELECT COALESCE(SUM(amountPaise), 0) FROM txn WHERE direction = :direction AND occurredAt BETWEEN :from AND :to")
     suspend fun sumIn(direction: Direction, from: Long, to: Long): Long
 

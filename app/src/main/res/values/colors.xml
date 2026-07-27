@@ -13,4 +13,5 @@
     <color name="widget_muted">#75777F</color>
     <color name="widget_accent">#B3261E</color>
     <color name="widget_bar">#C9C6CE</color>
+    <color name="widget_positive">#2E7D32</color>
 </resources>

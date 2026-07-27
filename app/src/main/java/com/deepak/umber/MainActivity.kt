@@ -28,6 +28,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -43,6 +44,7 @@ import com.deepak.umber.ui.home.HomeScreen
 import com.deepak.umber.ui.review.ReviewScreen
 import com.deepak.umber.ui.settings.SettingsScreen
 import com.deepak.umber.ui.theme.UmberTheme
+import com.deepak.umber.widget.SpendWidget
 import com.deepak.umber.widget.SpendWidgetReceiver
 
 private const val RELEASES_URL = "https://github.com/DeepakSilaych/umber/releases/latest"
@@ -58,13 +60,29 @@ class MainActivity : ComponentActivity() {
 
     private val container: AppContainer by lazy { (application as UmberApp).container }
 
+    /**
+     * Tab requested by whoever launched us, e.g. the widget's "N to categorise" tap.
+     *
+     * Held as state rather than read once, because the activity is `singleTop`: a second launch
+     * delivers [onNewIntent] to the existing instance instead of recreating it, and reading the
+     * original intent would silently ignore the request.
+     */
+    private val requestedTab = mutableStateOf<String?>(null)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        requestedTab.value = intent?.getStringExtra(SpendWidget.EXTRA_TAB)
         setContent {
             UmberTheme {
-                AppScaffold(container)
+                AppScaffold(container, requestedTab)
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        requestedTab.value = intent.getStringExtra(SpendWidget.EXTRA_TAB)
     }
 
     // Location tracking is deliberately tied to the foreground lifecycle — see LocationCache for
@@ -82,7 +100,7 @@ class MainActivity : ComponentActivity() {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun AppScaffold(container: AppContainer) {
+private fun AppScaffold(container: AppContainer, requestedTab: MutableState<String?>) {
     val vm: UmberViewModel = viewModel(factory = UmberViewModel.factory(container))
 
     val home by vm.home.collectAsState()
@@ -94,6 +112,15 @@ private fun AppScaffold(container: AppContainer) {
     val modelStats by vm.modelStats.collectAsState()
 
     var tab by remember { mutableStateOf(Tab.HOME) }
+
+    // Consumed once, so returning to the app later doesn't keep yanking the user back.
+    LaunchedEffect(requestedTab.value) {
+        when (requestedTab.value) {
+            SpendWidget.TAB_REVIEW -> tab = Tab.REVIEW
+            else -> Unit
+        }
+        requestedTab.value = null
+    }
 
     val context = androidx.compose.ui.platform.LocalContext.current
     var smsGranted by remember {

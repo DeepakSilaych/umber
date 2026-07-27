@@ -1,6 +1,8 @@
 package com.deepak.umber.widget
 
 import android.content.Context
+import android.content.Intent
+import android.util.Log
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
@@ -9,12 +11,10 @@ import androidx.glance.GlanceId
 import androidx.glance.GlanceModifier
 import androidx.glance.ImageProvider
 import androidx.glance.LocalSize
-// The reified <Activity> overload lives in glance core; the appwidget package only offers the
-// Intent / ComponentName forms.
-import androidx.glance.action.actionStartActivity
 import androidx.glance.action.clickable
 import androidx.glance.appwidget.GlanceAppWidget
 import androidx.glance.appwidget.SizeMode
+import androidx.glance.appwidget.action.actionStartActivity
 import androidx.glance.appwidget.provideContent
 import androidx.glance.background
 import androidx.glance.layout.Alignment
@@ -30,20 +30,21 @@ import androidx.glance.text.FontWeight
 import androidx.glance.text.Text
 import androidx.glance.text.TextStyle
 import androidx.glance.unit.ColorProvider
-import com.deepak.umber.UmberApp
-import com.deepak.umber.R
 import com.deepak.umber.MainActivity
-import com.deepak.umber.data.db.CategoryTotal
+import com.deepak.umber.R
+import com.deepak.umber.UmberApp
 import com.deepak.umber.data.model.Money
 import com.deepak.umber.data.repo.SpendWindow
+import com.deepak.umber.data.repo.WidgetSnapshot
 import com.deepak.umber.data.repo.WindowSummary
+import kotlin.math.abs
 
 /**
  * Home-screen spend widget: rolling 24h / 7d / 30d totals.
  *
- * The whole point of this app is ambient awareness, so the numbers have to be visible without
+ * The whole point of the app is ambient awareness, so the numbers have to be readable without
  * opening anything. Windows are *rolling*, which means they go stale on their own — `RollupWorker`
- * exists purely to roll the boundaries forward, and ingest pushes an update the moment a
+ * exists purely to move the boundaries forward, and ingest pushes an update the moment a
  * transaction lands.
  */
 class SpendWidget : GlanceAppWidget() {
@@ -51,72 +52,100 @@ class SpendWidget : GlanceAppWidget() {
     override val sizeMode = SizeMode.Responsive(setOf(SMALL, MEDIUM, LARGE))
 
     override suspend fun provideGlance(context: Context, id: GlanceId) {
-        val container = (context.applicationContext as UmberApp).container
-        val repo = container.repository
+        // A throw here leaves a permanently broken widget on the home screen with no obvious way to
+        // retry, so every failure degrades to a state that at least says something useful.
+        val snapshot = runCatching {
+            (context.applicationContext as UmberApp).container.repository.widgetSnapshot()
+        }.onFailure { Log.e(TAG, "widget snapshot failed", it) }.getOrNull()
 
-        // Loaded before provideContent so the first frame is already correct — a widget that
-        // renders empty and then fills in reads as broken.
-        val summaries = repo.allSummaries().associateBy { it.window }
-        val buckets = bucketSeries(repo.dailySeries(SPARK_DAYS))
-        val top = repo.topCategories(SpendWindow.LAST_30D, limit = 3)
-
-        provideContent { WidgetBody(summaries, buckets, top) }
-    }
-
-    @Composable
-    private fun WidgetBody(
-        summaries: Map<SpendWindow, WindowSummary>,
-        buckets: List<Long>,
-        top: List<CategoryTotal>,
-    ) {
-        val size = LocalSize.current
-        val compact = size.width < MEDIUM.width
-        val tall = size.height >= LARGE.height
-
-        Column(
-            modifier = GlanceModifier
-                .fillMaxSize()
-                .background(ImageProvider(com.deepak.umber.R.drawable.widget_background))
-                .padding(12.dp)
-                .clickable(actionStartActivity<MainActivity>()),
-        ) {
-            if (compact) {
-                // Only room for one number: the 24h figure, which is the one that can still
-                // change today's behaviour.
-                AmountBlock(
-                    label = "Last 24h",
-                    summary = summaries[SpendWindow.LAST_24H],
-                    emphasis = true,
-                )
-            } else {
-                Row(modifier = GlanceModifier.fillMaxWidth()) {
-                    AmountBlock("24h", summaries[SpendWindow.LAST_24H], emphasis = true, modifier = GlanceModifier.defaultWeight())
-                    AmountBlock("7d", summaries[SpendWindow.LAST_7D], emphasis = false, modifier = GlanceModifier.defaultWeight())
-                    AmountBlock("30d", summaries[SpendWindow.LAST_30D], emphasis = false, modifier = GlanceModifier.defaultWeight())
+        provideContent {
+            Column(
+                modifier = GlanceModifier
+                    .fillMaxSize()
+                    .background(ImageProvider(R.drawable.widget_background))
+                    .padding(12.dp)
+                    .clickable(actionStartActivity(openTab(context, null))),
+            ) {
+                when {
+                    snapshot == null -> Message("Couldn't load", "Tap to open Umber")
+                    // "Nothing spent" and "nothing imported" look identical as ₹0, but mean very
+                    // different things and need very different next steps.
+                    snapshot.isEmpty -> Message("No transactions yet", "Tap to import your SMS")
+                    else -> Body(context, snapshot)
                 }
-            }
-
-            if (tall) {
-                Spacer(GlanceModifier.height(12.dp))
-                Sparkline(buckets)
-                Spacer(GlanceModifier.height(10.dp))
-                TopCategories(top)
             }
         }
     }
 
     @Composable
-    private fun AmountBlock(
+    private fun Message(title: String, detail: String) {
+        Box(modifier = GlanceModifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Column(horizontalAlignment = Alignment.Horizontal.CenterHorizontally) {
+                Text(title, style = TextStyle(color = PRIMARY, fontSize = 14.sp, fontWeight = FontWeight.Medium))
+                Spacer(GlanceModifier.height(4.dp))
+                Text(detail, style = TextStyle(color = MUTED, fontSize = 11.sp))
+            }
+        }
+    }
+
+    @Composable
+    private fun Body(context: Context, snapshot: WidgetSnapshot) {
+        val size = LocalSize.current
+        val compact = size.width < MEDIUM.width
+        val tall = size.height >= LARGE.height
+
+        if (compact) {
+            // Only room for one figure: the 24h number, which is the one that can still change
+            // today's behaviour.
+            Amount("Last 24h", snapshot.summaries[SpendWindow.LAST_24H], emphasis = true)
+        } else {
+            Row(modifier = GlanceModifier.fillMaxWidth()) {
+                Amount("24h", snapshot.summaries[SpendWindow.LAST_24H], true, GlanceModifier.defaultWeight())
+                Amount("7d", snapshot.summaries[SpendWindow.LAST_7D], false, GlanceModifier.defaultWeight())
+                Amount("30d", snapshot.summaries[SpendWindow.LAST_30D], false, GlanceModifier.defaultWeight())
+            }
+        }
+
+        snapshot.weekTrendPercent?.let { trend ->
+            Spacer(GlanceModifier.height(6.dp))
+            Text(
+                // Direction of travel is what makes a number actionable. "▲ 23% vs last week"
+                // means something; "₹4,200" alone does not.
+                text = (if (trend >= 0) "▲ " else "▼ ") + "${abs(trend)}% vs last week",
+                style = TextStyle(
+                    color = if (trend >= 0) ACCENT else POSITIVE,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Medium,
+                ),
+            )
+        }
+
+        if (tall) {
+            Spacer(GlanceModifier.height(10.dp))
+            Sparkline(bucketSeries(snapshot.daily))
+            Spacer(GlanceModifier.height(8.dp))
+            TopCategories(snapshot)
+        }
+
+        if (snapshot.reviewCount > 0) {
+            Spacer(GlanceModifier.height(6.dp))
+            Text(
+                text = "${snapshot.reviewCount} to categorise →",
+                style = TextStyle(color = MUTED, fontSize = 11.sp, fontWeight = FontWeight.Medium),
+                modifier = GlanceModifier.clickable(actionStartActivity(openTab(context, TAB_REVIEW))),
+            )
+        }
+    }
+
+    @Composable
+    private fun Amount(
         label: String,
         summary: WindowSummary?,
         emphasis: Boolean,
         modifier: GlanceModifier = GlanceModifier,
     ) {
         Column(modifier = modifier) {
-            Text(
-                text = label,
-                style = TextStyle(color = MUTED, fontSize = 11.sp, fontWeight = FontWeight.Medium),
-            )
+            Text(label, style = TextStyle(color = MUTED, fontSize = 11.sp, fontWeight = FontWeight.Medium))
             Spacer(GlanceModifier.height(2.dp))
             Text(
                 text = Money.compact(summary?.spentPaise ?: 0L),
@@ -126,15 +155,12 @@ class SpendWidget : GlanceAppWidget() {
                     fontWeight = FontWeight.Bold,
                 ),
             )
-            Text(
-                text = "${summary?.txnCount ?: 0} txn",
-                style = TextStyle(color = MUTED, fontSize = 10.sp),
-            )
+            Text("${summary?.txnCount ?: 0} txn", style = TextStyle(color = MUTED, fontSize = 10.sp))
         }
     }
 
     /**
-     * A bar per 3-day bucket over the last 30 days.
+     * A bar per 3-day bucket over the last 30 days, most recent on the right and highlighted.
      *
      * Bucketed rather than one bar per day because Glance renders through RemoteViews, where a
      * container with 30 children is both fragile and unreadable at widget width.
@@ -147,18 +173,19 @@ class SpendWidget : GlanceAppWidget() {
             modifier = GlanceModifier.fillMaxWidth().height(SPARK_HEIGHT_DP.dp),
             verticalAlignment = Alignment.Vertical.Bottom,
         ) {
-            buckets.forEach { value ->
+            buckets.forEachIndexed { index, value ->
                 val ratio = value.toFloat() / peak.toFloat()
-                // A floor of 2dp keeps zero-spend buckets visible as a baseline rather than
-                // vanishing, so the axis stays legible.
+                // A 2dp floor keeps empty buckets visible as a baseline rather than vanishing,
+                // which would leave the axis unreadable.
                 val barHeight = (2f + ratio * (SPARK_HEIGHT_DP - 2f)).toInt().coerceAtLeast(2)
+                val newest = index == buckets.lastIndex
 
                 Box(modifier = GlanceModifier.defaultWeight().padding(horizontal = 1.dp)) {
                     Box(
                         modifier = GlanceModifier
                             .fillMaxWidth()
                             .height(barHeight.dp)
-                            .background(if (ratio > 0.66f) ACCENT else BAR),
+                            .background(if (newest) ACCENT else BAR),
                     ) {}
                 }
             }
@@ -166,9 +193,9 @@ class SpendWidget : GlanceAppWidget() {
     }
 
     @Composable
-    private fun TopCategories(top: List<CategoryTotal>) {
+    private fun TopCategories(snapshot: WidgetSnapshot) {
         Column(modifier = GlanceModifier.fillMaxWidth()) {
-            top.take(3).forEach { entry ->
+            snapshot.topCategories.take(3).forEach { entry ->
                 Row(modifier = GlanceModifier.fillMaxWidth()) {
                     Text(
                         text = entry.category,
@@ -186,23 +213,40 @@ class SpendWidget : GlanceAppWidget() {
     }
 
     companion object {
-        val SMALL = DpSize(120.dp, 90.dp)
-        val MEDIUM = DpSize(250.dp, 90.dp)
-        val LARGE = DpSize(250.dp, 190.dp)
+        const val TAB_REVIEW = "REVIEW"
+        const val EXTRA_TAB = "com.deepak.umber.EXTRA_TAB"
 
-        private const val SPARK_DAYS = 30
+        private const val TAG = "SpendWidget"
+
+        val SMALL = DpSize(120.dp, 90.dp)
+        val MEDIUM = DpSize(250.dp, 100.dp)
+        val LARGE = DpSize(250.dp, 200.dp)
+
         private const val SPARK_BUCKETS = 10
         private const val SPARK_HEIGHT_DP = 34
 
         /**
-         * Resource-backed rather than literal colours: Glance 1.1 offers no day/night
-         * ColorProvider, so the light/dark pair lives in `values/` and `values-night/` and the
-         * platform picks the right one at render time.
+         * Resource-backed rather than literal colours: Glance 1.1 has no day/night ColorProvider,
+         * so the light/dark pair lives in `values/` and `values-night/` and the platform resolves
+         * it at render time.
          */
         private val PRIMARY = ColorProvider(R.color.widget_text)
         private val MUTED = ColorProvider(R.color.widget_muted)
         private val ACCENT = ColorProvider(R.color.widget_accent)
+        private val POSITIVE = ColorProvider(R.color.widget_positive)
         private val BAR = ColorProvider(R.color.widget_bar)
+
+        /**
+         * A distinct action per target.
+         *
+         * Two PendingIntents differing only in their extras compare as equal, so the system reuses
+         * the first — which would silently send every tap to whichever tab was registered first.
+         */
+        fun openTab(context: Context, tab: String?): Intent =
+            Intent(context, MainActivity::class.java)
+                .setAction("com.deepak.umber.OPEN_" + (tab ?: "HOME"))
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                .apply { if (tab != null) putExtra(EXTRA_TAB, tab) }
 
         /** Collapses the daily series into [SPARK_BUCKETS] equal-width sums, oldest first. */
         fun bucketSeries(daily: List<Long>): List<Long> {
