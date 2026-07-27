@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      Compose owns all in-app theming; this exists only so the window has sane colours before the
+      first composition and during the launch animation.
+    -->
+    <style name="Theme.Umber" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:statusBarColor">@color/surface</item>
+        <item name="android:navigationBarColor">@color/surface</item>
+        <item name="android:windowBackground">@color/surface</item>
+    </style>
+</resources>

@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Three ascending bars: the 24h / 7d / 30d idea, reduced to a mark. -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M32,64h9v14h-9z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M49.5,52h9v26h-9z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M67,38h9v40h-9z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:fillAlpha="0.55"
+        android:pathData="M30,34h18v5h-18z" />
+</vector>
