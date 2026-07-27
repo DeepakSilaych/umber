@@ -45,6 +45,8 @@ fun SettingsScreen(
     onImportCsv: () -> Unit,
     versionName: String,
     onCheckUpdates: () -> Unit,
+    canPinWidget: Boolean,
+    onAddWidget: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -249,6 +251,38 @@ fun SettingsScreen(
                         "location data never leave this device — there is no server to send them to.",
                     style = MaterialTheme.typography.bodySmall,
                 )
+            }
+        }
+
+        Card {
+            Column(Modifier.padding(14.dp)) {
+                Text("Home screen widget", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "Shows rolling 24 hour, 7 day and 30 day spend. Resize it for a sparkline and " +
+                        "your top categories. Tapping it opens Umber.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(10.dp))
+                OutlinedButton(
+                    onClick = onAddWidget,
+                    enabled = canPinWidget,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(if (canPinWidget) "Add widget to home screen" else "Add it from your launcher")
+                }
+                if (!canPinWidget) {
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        // Some launchers don't implement the pin request, so say where to look
+                        // rather than leaving a dead button.
+                        "Your launcher doesn't support adding widgets from inside an app. " +
+                            "Long-press the home screen → Widgets → Umber.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
         }
 

@@ -1,6 +1,8 @@
 package com.deepak.umber
 
 import android.Manifest
+import android.appwidget.AppWidgetManager
+import android.content.ComponentName
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -41,6 +43,7 @@ import com.deepak.umber.ui.home.HomeScreen
 import com.deepak.umber.ui.review.ReviewScreen
 import com.deepak.umber.ui.settings.SettingsScreen
 import com.deepak.umber.ui.theme.UmberTheme
+import com.deepak.umber.widget.SpendWidgetReceiver
 
 private const val RELEASES_URL = "https://github.com/DeepakSilaych/umber/releases/latest"
 
@@ -225,6 +228,20 @@ private fun AppScaffold(container: AppContainer) {
                 onExportCsv = { ledgerExporter.launch("ledger-export.csv") },
                 onImportCsv = { ledgerPicker.launch(arrayOf("*/*")) },
                 versionName = BuildConfig.VERSION_NAME,
+                canPinWidget = remember {
+                    AppWidgetManager.getInstance(context)?.isRequestPinAppWidgetSupported == true
+                },
+                // Asks the launcher to show its own "add this widget?" prompt. Most launchers
+                // support it; the ones that don't get told where to find the widget manually.
+                onAddWidget = {
+                    runCatching {
+                        AppWidgetManager.getInstance(context)?.requestPinAppWidget(
+                            ComponentName(context, SpendWidgetReceiver::class.java),
+                            null,
+                            null,
+                        )
+                    }
+                },
                 // Handing the URL to a browser needs no INTERNET permission of our own — the
                 // browser does the networking. It's the only update check possible without
                 // giving this app network access, which would defeat the point of it.
