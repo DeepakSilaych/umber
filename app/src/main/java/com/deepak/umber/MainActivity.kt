@@ -206,14 +206,20 @@ private fun AppScaffold(container: AppContainer) {
                 onRetrain = { vm.retrain() },
                 onReparse = { vm.reparseRejected() },
                 onRebuild = { vm.rebuildLedger() },
-                // Bank exports are served with wildly inconsistent MIME types — text/csv,
-                // text/comma-separated-values, application/vnd.ms-excel, or octet-stream. Filtering
-                // narrowly would grey out the very file the user is trying to pick.
-                onImportStatement = {
-                    statementPicker.launch(arrayOf("text/*", "application/vnd.ms-excel", "application/octet-stream"))
-                },
+                // Deliberately unfiltered.
+                //
+                // The importer identifies the format from magic bytes precisely because MIME is
+                // unreliable here: banks serve a CSV named .xls, providers disagree about
+                // spreadsheet types, and a real SBI .xlsx export arrives as
+                // "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" — a type an
+                // earlier hand-written allowlist omitted, which silently greyed out the one file
+                // the user was trying to pick.
+                //
+                // A filter that hides the target file is a dead end. Showing a few extra files is
+                // a mild annoyance that the format sniffer already reports clearly.
+                onImportStatement = { statementPicker.launch(arrayOf("*/*")) },
                 onExportCsv = { ledgerExporter.launch("ledger-export.csv") },
-                onImportCsv = { ledgerPicker.launch(arrayOf("text/*", "application/octet-stream")) },
+                onImportCsv = { ledgerPicker.launch(arrayOf("*/*")) },
                 modifier = Modifier.padding(padding),
             )
         }
