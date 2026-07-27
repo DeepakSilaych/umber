@@ -1,21 +1,32 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  Three ascending bars plus a baseline — the same mark as docs/logo.svg, so the launcher icon and
+  the README logo are one design.
+
+  Geometry is scaled to sit inside the adaptive-icon safe zone: every corner of every shape stays
+  within radius 36 of centre (54,54), so a circular launcher mask can't clip the tallest bar or the
+  ends of the baseline.
+-->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <!-- Three ascending bars: the 24h / 7d / 30d idea, reduced to a mark. -->
+
     <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M32,64h9v14h-9z" />
-    <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M49.5,52h9v26h-9z" />
-    <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M67,38h9v40h-9z" />
-    <path
-        android:fillColor="#FFFFFF"
+        android:fillColor="#F7EDE2"
         android:fillAlpha="0.55"
-        android:pathData="M30,34h18v5h-18z" />
+        android:pathData="M36,52 h5 a3,3 0 0 1 3,3 v12 a3,3 0 0 1 -3,3 h-5 a3,3 0 0 1 -3,-3 v-12 a3,3 0 0 1 3,-3 z" />
+    <path
+        android:fillColor="#F7EDE2"
+        android:fillAlpha="0.78"
+        android:pathData="M51,41 h5 a3,3 0 0 1 3,3 v23 a3,3 0 0 1 -3,3 h-5 a3,3 0 0 1 -3,-3 v-23 a3,3 0 0 1 3,-3 z" />
+    <path
+        android:fillColor="#F7EDE2"
+        android:pathData="M66,30 h5 a3,3 0 0 1 3,3 v34 a3,3 0 0 1 -3,3 h-5 a3,3 0 0 1 -3,-3 v-34 a3,3 0 0 1 3,-3 z" />
+
+    <path
+        android:fillColor="#F7EDE2"
+        android:fillAlpha="0.32"
+        android:pathData="M31.5,74 h45 a1.5,1.5 0 0 1 0,3 h-45 a1.5,1.5 0 0 1 0,-3 z" />
 </vector>
