@@ -15,21 +15,60 @@ import com.deepak.umber.io.StatementImporter
 import com.deepak.umber.ml.Classifier
 import com.deepak.umber.ml.ModelStats
 import kotlinx.coroutines.flow.Flow
+import java.time.DayOfWeek
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import java.time.temporal.TemporalAdjusters
 
 /**
- * The three rolling windows the widget and home screen are built around.
+ * The periods the widget and home screen are built around.
  *
- * Rolling, not calendar-aligned: "last 24 hours" is more useful for in-the-moment awareness than
- * "today", which resets to zero at midnight exactly when you stop being able to change the outcome.
+ * Calendar-aligned apart from the first, because "this week" and "last week" are how people
+ * actually reason about their own spending — a rolling 7-day figure silently reshuffles its
+ * boundaries every day and can never be compared against anything.
+ *
+ * Weeks start Monday (ISO), which matches [java.time.DayOfWeek] ordering and Indian convention.
+ * [LAST_24H] stays rolling on purpose: it answers "what have I just spent", which a figure that
+ * resets at midnight cannot.
  */
-enum class SpendWindow(val label: String, val durationMs: Long) {
-    LAST_24H("Last 24 hours", 24 * 60 * 60 * 1000L),
-    LAST_7D("Last 7 days", 7 * 24 * 60 * 60 * 1000L),
-    LAST_30D("Last 30 days", 30L * 24 * 60 * 60 * 1000L),
+enum class SpendWindow(val label: String, val shortLabel: String) {
+    LAST_24H("Last 24 hours", "Last 24h"),
+    THIS_WEEK("This week", "This week"),
+    LAST_WEEK("Last week", "Last week"),
+    THIS_MONTH("This month", "This month"),
+    LAST_MONTH("Last month", "Last month"),
+    ;
+
+    /**
+     * Inclusive start and end instants for this period, evaluated against [now].
+     *
+     * Completed periods end at the instant the next one begins, minus a millisecond — anything
+     * looser would double-count a transaction that lands exactly on a boundary.
+     */
+    fun range(now: Long, zone: ZoneId = ZoneId.systemDefault()): Pair<Long, Long> {
+        val today = Instant.ofEpochMilli(now).atZone(zone).toLocalDate()
+        fun startOf(date: LocalDate) = date.atStartOfDay(zone).toInstant().toEpochMilli()
+
+        return when (this) {
+            LAST_24H -> (now - 24 * 60 * 60 * 1000L) to now
+
+            THIS_WEEK -> startOf(today.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))) to now
+
+            LAST_WEEK -> {
+                val thisMonday = today.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
+                startOf(thisMonday.minusWeeks(1)) to (startOf(thisMonday) - 1)
+            }
+
+            THIS_MONTH -> startOf(today.withDayOfMonth(1)) to now
+
+            LAST_MONTH -> {
+                val firstOfThis = today.withDayOfMonth(1)
+                startOf(firstOfThis.minusMonths(1)) to (startOf(firstOfThis) - 1)
+            }
+        }
+    }
 }
 
 data class WindowSummary(
@@ -61,21 +100,9 @@ data class WidgetSnapshot(
     val topCategories: List<CategoryTotal>,
     val reviewCount: Int,
     val totalCount: Int,
-    val previousWeekPaise: Long,
 ) {
     /** "Nothing spent" and "nothing imported" deserve very different messages. */
     val isEmpty: Boolean get() = totalCount == 0
-
-    /**
-     * Percentage change over the last 7 days versus the 7 before it, or null when there is no
-     * baseline to compare against — showing "+100%" against a week of zero spending is noise.
-     */
-    val weekTrendPercent: Int?
-        get() {
-            val current = summaries[SpendWindow.LAST_7D]?.spentPaise ?: return null
-            if (previousWeekPaise <= 0L) return null
-            return (((current - previousWeekPaise) * 100.0) / previousWeekPaise).toInt()
-        }
 }
 
 class UmberRepository(
@@ -118,8 +145,8 @@ class UmberRepository(
     }
 
     suspend fun summary(window: SpendWindow, now: Long = System.currentTimeMillis()): WindowSummary {
-        val from = now - window.durationMs
-        val net = netting(from, now)
+        val (from, to) = window.range(now)
+        val net = netting(from, to)
 
         val top = net.netByCategory
             .filterValues { it > 0 }
@@ -131,9 +158,9 @@ class UmberRepository(
             spentPaise = net.netPaise,
             grossSpentPaise = net.grossPaise,
             reimbursedPaise = net.reimbursedPaise,
-            receivedPaise = db.txns().sumIn(Direction.CREDIT, from, now),
-            incomePaise = db.txns().sumCategoryIn(Direction.CREDIT, Categories.INCOME, from, now),
-            txnCount = db.txns().countIn(Direction.DEBIT, from, now),
+            receivedPaise = db.txns().sumIn(Direction.CREDIT, from, to),
+            incomePaise = db.txns().sumCategoryIn(Direction.CREDIT, Categories.INCOME, from, to),
+            txnCount = db.txns().countIn(Direction.DEBIT, from, to),
             topCategory = top,
         )
     }
@@ -142,16 +169,12 @@ class UmberRepository(
     suspend fun netSpendBetween(from: Long, to: Long): Long = netting(from, to).netPaise
 
     suspend fun widgetSnapshot(now: Long = System.currentTimeMillis()): WidgetSnapshot {
-        val week = SpendWindow.LAST_7D.durationMs
         return WidgetSnapshot(
             summaries = SpendWindow.entries.associateWith { summary(it, now) },
             daily = dailySeries(days = 30, now = now),
-            topCategories = topCategories(SpendWindow.LAST_30D, limit = 3, now = now),
+            topCategories = topCategories(SpendWindow.THIS_MONTH, limit = 3, now = now),
             reviewCount = db.txns().needingReviewCountNow(),
             totalCount = db.txns().totalCountNow(),
-            // The 7 days before the current 7, so the figure has a reference point rather than
-            // being a number with nothing to compare it to.
-            previousWeekPaise = netSpendBetween(now - 2 * week, now - week),
         )
     }
 
@@ -159,7 +182,7 @@ class UmberRepository(
     suspend fun accountTotals(
         window: SpendWindow,
         now: Long = System.currentTimeMillis(),
-    ): List<AccountTotal> = db.txns().spendByAccount(now - window.durationMs, now)
+    ): List<AccountTotal> = window.range(now).let { (from, to) -> db.txns().spendByAccount(from, to) }
 
     suspend fun allSummaries(now: Long = System.currentTimeMillis()): List<WindowSummary> =
         SpendWindow.entries.map { summary(it, now) }
@@ -170,11 +193,11 @@ class UmberRepository(
         limit: Int = 5,
         now: Long = System.currentTimeMillis(),
     ): List<CategoryTotal> {
-        val from = now - window.durationMs
-        val counts = db.txns().topCategories(Direction.DEBIT, from, now, Int.MAX_VALUE)
+        val (from, to) = window.range(now)
+        val counts = db.txns().topCategories(Direction.DEBIT, from, to, Int.MAX_VALUE)
             .associate { it.category to it.txnCount }
 
-        return netting(from, now).netByCategory
+        return netting(from, to).netByCategory
             .filterValues { it > 0 }
             .map { (category, paise) -> CategoryTotal(category, paise, counts[category] ?: 0) }
             .sortedByDescending { it.totalPaise }

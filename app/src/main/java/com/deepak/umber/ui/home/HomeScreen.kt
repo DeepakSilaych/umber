@@ -20,6 +20,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -54,7 +55,11 @@ fun HomeScreen(
     }
 
     val byWindow = state.summaries.associateBy { it.window }
-    val month = byWindow[SpendWindow.LAST_30D]
+    val month = byWindow[SpendWindow.THIS_MONTH]
+
+    // Days elapsed this month, so the daily average divides by days actually lived rather than a
+    // flat 30 — on the 3rd, dividing by 30 understates spending tenfold.
+    val dayOfMonth = remember { java.time.LocalDate.now().dayOfMonth }
 
     LazyColumn(modifier = modifier.fillMaxSize()) {
 
@@ -70,15 +75,32 @@ fun HomeScreen(
             }
         }
 
+        // Calendar periods in pairs, so each figure sits next to the one it invites comparison
+        // with: this week against last week, this month against last.
         item {
             Row(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                byWindow[SpendWindow.LAST_7D]?.let {
+                byWindow[SpendWindow.THIS_WEEK]?.let {
                     SummaryCard(it, emphasis = false, modifier = Modifier.weight(1f))
                 }
+                byWindow[SpendWindow.LAST_WEEK]?.let {
+                    SummaryCard(it, emphasis = false, modifier = Modifier.weight(1f))
+                }
+            }
+        }
+
+        item {
+            Spacer(Modifier.height(8.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
                 month?.let {
+                    SummaryCard(it, emphasis = false, modifier = Modifier.weight(1f))
+                }
+                byWindow[SpendWindow.LAST_MONTH]?.let {
                     SummaryCard(it, emphasis = false, modifier = Modifier.weight(1f))
                 }
             }
@@ -115,7 +137,7 @@ fun HomeScreen(
                 Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
                     Column(Modifier.padding(14.dp)) {
                         Text(
-                            "Last 30 days",
+                            "This month",
                             style = MaterialTheme.typography.titleSmall,
                             fontWeight = FontWeight.SemiBold,
                         )
@@ -134,7 +156,7 @@ fun HomeScreen(
                         Spacer(Modifier.height(6.dp))
                         StatLine("Income", Money.format(m.incomePaise))
                         StatLine("Saved", Money.format(m.incomePaise - m.spentPaise))
-                        StatLine("Average per day", Money.format(m.spentPaise / 30))
+                        StatLine("Average per day", Money.format(m.spentPaise / dayOfMonth.coerceAtLeast(1)))
                         StatLine("Transactions", m.txnCount.toString())
 
                         if (m.reimbursedPaise > 0) {

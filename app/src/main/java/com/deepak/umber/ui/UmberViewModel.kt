@@ -80,9 +80,9 @@ class UmberViewModel(private val container: AppContainer) : ViewModel() {
         HomeUiState(
             loading = false,
             summaries = repository.allSummaries(now),
-            topCategories = repository.topCategories(SpendWindow.LAST_30D, limit = 8, now = now),
+            topCategories = repository.topCategories(SpendWindow.THIS_MONTH, limit = 8, now = now),
             daily = repository.dailySeries(days = 30, now = now),
-            accounts = repository.accountTotals(SpendWindow.LAST_30D, now = now),
+            accounts = repository.accountTotals(SpendWindow.THIS_MONTH, now = now),
             reviewCount = reviewCount,
             totalCount = totalCount,
         )

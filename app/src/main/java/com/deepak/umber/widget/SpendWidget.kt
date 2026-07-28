@@ -50,7 +50,14 @@ import kotlin.math.abs
  */
 class SpendWidget : GlanceAppWidget() {
 
-    override val sizeMode = SizeMode.Responsive(setOf(SMALL, MEDIUM, LARGE))
+    /**
+     * Exact, not Responsive.
+     *
+     * Under `SizeMode.Responsive`, `LocalSize` reports the *matched breakpoint* rather than the real
+     * widget size — so a 260dp-tall widget read as 140dp and silently rendered the cramped layout.
+     * Exact reports true dimensions, which is what the height tiers below actually need.
+     */
+    override val sizeMode = SizeMode.Exact
 
     override suspend fun provideGlance(context: Context, id: GlanceId) {
         // A throw here leaves a permanently broken widget on the home screen with no obvious way to
@@ -64,7 +71,7 @@ class SpendWidget : GlanceAppWidget() {
                 modifier = GlanceModifier
                     .fillMaxSize()
                     .background(ImageProvider(R.drawable.widget_background))
-                    .padding(12.dp)
+                    .padding(10.dp)
                     .clickable(actionStartActivity(openTab(context, null))),
             ) {
                 when {
@@ -92,51 +99,73 @@ class SpendWidget : GlanceAppWidget() {
     @Composable
     private fun ColumnScope.Body(context: Context, snapshot: WidgetSnapshot) {
         val size = LocalSize.current
-        val compact = size.width < MEDIUM.width
+        val compact = size.width < WIDE_THRESHOLD
         val tall = size.height >= TALL_THRESHOLD
 
-        if (compact) {
-            // Only room for one figure: the 24h number, which is the one that can still change
-            // today's behaviour.
-            Amount("Last 24h", snapshot.summaries[SpendWindow.LAST_24H], emphasis = true)
-        } else {
-            Row(modifier = GlanceModifier.fillMaxWidth()) {
-                Amount("24h", snapshot.summaries[SpendWindow.LAST_24H], true, GlanceModifier.defaultWeight())
-                Amount("7d", snapshot.summaries[SpendWindow.LAST_7D], false, GlanceModifier.defaultWeight())
-                Amount("30d", snapshot.summaries[SpendWindow.LAST_30D], false, GlanceModifier.defaultWeight())
-            }
+        // Rows are dropped rather than allowed to overflow: Glance clips silently, so content that
+        // does not fit simply disappears mid-line with no indication it was ever there.
+        val rows = when {
+            size.height >= 165.dp -> PERIOD_ROWS
+            size.height >= 130.dp -> PERIOD_ROWS.take(2)
+            else -> emptyList()
+        }
+        val showTxnCount = size.height >= 150.dp
+        val showReview = size.height >= 115.dp
+
+        // The 24-hour figure leads because it is the only one that can still change today's
+        // behaviour; the calendar periods below it are for context.
+        Amount(
+            label = SpendWindow.LAST_24H.shortLabel,
+            summary = snapshot.summaries[SpendWindow.LAST_24H],
+            emphasis = true,
+            showTxnCount = showTxnCount,
+        )
+
+        if (rows.isNotEmpty()) Spacer(GlanceModifier.height(6.dp))
+
+        rows.forEach { window ->
+            PeriodRow(window, snapshot.summaries[window], compact)
         }
 
-        snapshot.weekTrendPercent?.let { trend ->
-            Spacer(GlanceModifier.height(6.dp))
-            Text(
-                // Direction of travel is what makes a number actionable. "▲ 23% vs last week"
-                // means something; "₹4,200" alone does not.
-                text = (if (trend >= 0) "▲ " else "▼ ") + "${abs(trend)}% vs last week",
-                style = TextStyle(
-                    color = if (trend >= 0) ACCENT else POSITIVE,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Medium,
-                ),
-            )
-        }
-
-        if (snapshot.reviewCount > 0) {
+        if (showReview && snapshot.reviewCount > 0) {
             Spacer(GlanceModifier.height(6.dp))
             Text(
                 text = "${snapshot.reviewCount} to categorise →",
-                style = TextStyle(color = MUTED, fontSize = 11.sp, fontWeight = FontWeight.Medium),
+                style = TextStyle(color = ACCENT, fontSize = 11.sp, fontWeight = FontWeight.Medium),
                 modifier = GlanceModifier.clickable(actionStartActivity(openTab(context, TAB_REVIEW))),
             )
         }
 
         if (tall) {
-            // Pushes the chart to the bottom edge so the figures sit at the top and the space
-            // between them is filled, rather than everything bunching under the header.
+            // Anchors the extras to the bottom edge so the space between them and the figures is
+            // filled rather than trailing off.
             Spacer(GlanceModifier.defaultWeight())
             TopCategories(snapshot)
-            Spacer(GlanceModifier.height(8.dp))
-            Sparkline(bucketSeries(snapshot.daily))
+            if (size.height >= SPARKLINE_THRESHOLD) {
+                Spacer(GlanceModifier.height(8.dp))
+                Sparkline(bucketSeries(snapshot.daily))
+            }
+        }
+    }
+
+    /** One calendar period: label on the left, amount right-aligned against it. */
+    @Composable
+    private fun PeriodRow(window: SpendWindow, summary: WindowSummary?, compact: Boolean) {
+        Row(modifier = GlanceModifier.fillMaxWidth()) {
+            Text(
+                text = window.shortLabel,
+                style = TextStyle(color = MUTED, fontSize = if (compact) 11.sp else 12.sp),
+                modifier = GlanceModifier.defaultWeight(),
+                maxLines = 1,
+            )
+            Text(
+                text = Money.compact(summary?.spentPaise ?: 0L),
+                style = TextStyle(
+                    color = PRIMARY,
+                    fontSize = if (compact) 12.sp else 13.sp,
+                    fontWeight = FontWeight.Medium,
+                ),
+            )
         }
     }
 
@@ -146,6 +175,7 @@ class SpendWidget : GlanceAppWidget() {
         summary: WindowSummary?,
         emphasis: Boolean,
         modifier: GlanceModifier = GlanceModifier,
+        showTxnCount: Boolean = true,
     ) {
         Column(modifier = modifier) {
             Text(label, style = TextStyle(color = MUTED, fontSize = 11.sp, fontWeight = FontWeight.Medium))
@@ -154,11 +184,13 @@ class SpendWidget : GlanceAppWidget() {
                 text = Money.compact(summary?.spentPaise ?: 0L),
                 style = TextStyle(
                     color = if (emphasis) ACCENT else PRIMARY,
-                    fontSize = if (emphasis) 22.sp else 17.sp,
+                    fontSize = if (emphasis) 20.sp else 16.sp,
                     fontWeight = FontWeight.Bold,
                 ),
             )
-            Text("${summary?.txnCount ?: 0} txn", style = TextStyle(color = MUTED, fontSize = 10.sp))
+            if (showTxnCount) {
+                Text("${summary?.txnCount ?: 0} txn", style = TextStyle(color = MUTED, fontSize = 10.sp))
+            }
         }
     }
 
@@ -228,12 +260,26 @@ class SpendWidget : GlanceAppWidget() {
          * 160×160dp. Every 2×2 therefore rendered the short layout inside a tall box and left two
          * thirds of it empty.
          */
-        val SMALL = DpSize(100.dp, 70.dp)
-        val MEDIUM = DpSize(250.dp, 70.dp)
-        val LARGE = DpSize(140.dp, 140.dp)
+        /** Below this width there is only room for one figure per line. */
+        private val WIDE_THRESHOLD = 250.dp
 
-        /** Above this height there is room for the sparkline and category breakdown. */
-        private val TALL_THRESHOLD = 140.dp
+        /** Above this height there is room for the category breakdown. */
+        private val TALL_THRESHOLD = 215.dp
+
+        /**
+         * The sparkline only appears on genuinely large widgets. At 2x2 the figures, review count
+         * and categories already fill the box, and adding it pushed the chart past the bottom edge
+         * where Glance clipped it without a trace.
+         */
+        private val SPARKLINE_THRESHOLD = 300.dp
+
+        /** Calendar periods listed under the headline figure, in the order they read best. */
+        private val PERIOD_ROWS = listOf(
+            SpendWindow.THIS_WEEK,
+            SpendWindow.LAST_WEEK,
+            SpendWindow.THIS_MONTH,
+            SpendWindow.LAST_MONTH,
+        )
 
         private const val SPARK_BUCKETS = 10
         private const val SPARK_HEIGHT_DP = 34
