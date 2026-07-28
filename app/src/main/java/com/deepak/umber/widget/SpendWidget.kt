@@ -20,6 +20,7 @@ import androidx.glance.background
 import androidx.glance.layout.Alignment
 import androidx.glance.layout.Box
 import androidx.glance.layout.Column
+import androidx.glance.layout.ColumnScope
 import androidx.glance.layout.Row
 import androidx.glance.layout.Spacer
 import androidx.glance.layout.fillMaxSize
@@ -89,10 +90,10 @@ class SpendWidget : GlanceAppWidget() {
     }
 
     @Composable
-    private fun Body(context: Context, snapshot: WidgetSnapshot) {
+    private fun ColumnScope.Body(context: Context, snapshot: WidgetSnapshot) {
         val size = LocalSize.current
         val compact = size.width < MEDIUM.width
-        val tall = size.height >= LARGE.height
+        val tall = size.height >= TALL_THRESHOLD
 
         if (compact) {
             // Only room for one figure: the 24h number, which is the one that can still change
@@ -120,13 +121,6 @@ class SpendWidget : GlanceAppWidget() {
             )
         }
 
-        if (tall) {
-            Spacer(GlanceModifier.height(10.dp))
-            Sparkline(bucketSeries(snapshot.daily))
-            Spacer(GlanceModifier.height(8.dp))
-            TopCategories(snapshot)
-        }
-
         if (snapshot.reviewCount > 0) {
             Spacer(GlanceModifier.height(6.dp))
             Text(
@@ -134,6 +128,15 @@ class SpendWidget : GlanceAppWidget() {
                 style = TextStyle(color = MUTED, fontSize = 11.sp, fontWeight = FontWeight.Medium),
                 modifier = GlanceModifier.clickable(actionStartActivity(openTab(context, TAB_REVIEW))),
             )
+        }
+
+        if (tall) {
+            // Pushes the chart to the bottom edge so the figures sit at the top and the space
+            // between them is filled, rather than everything bunching under the header.
+            Spacer(GlanceModifier.defaultWeight())
+            TopCategories(snapshot)
+            Spacer(GlanceModifier.height(8.dp))
+            Sparkline(bucketSeries(snapshot.daily))
         }
     }
 
@@ -218,9 +221,19 @@ class SpendWidget : GlanceAppWidget() {
 
         private const val TAG = "SpendWidget"
 
-        val SMALL = DpSize(120.dp, 90.dp)
-        val MEDIUM = DpSize(250.dp, 100.dp)
-        val LARGE = DpSize(250.dp, 200.dp)
+        /**
+         * Breakpoints sized against real launcher cells, not round numbers.
+         *
+         * The first cut used 250×200 for LARGE, which no 2×2 widget ever reaches — a 2×2 is around
+         * 160×160dp. Every 2×2 therefore rendered the short layout inside a tall box and left two
+         * thirds of it empty.
+         */
+        val SMALL = DpSize(100.dp, 70.dp)
+        val MEDIUM = DpSize(250.dp, 70.dp)
+        val LARGE = DpSize(140.dp, 140.dp)
+
+        /** Above this height there is room for the sparkline and category breakdown. */
+        private val TALL_THRESHOLD = 140.dp
 
         private const val SPARK_BUCKETS = 10
         private const val SPARK_HEIGHT_DP = 34
