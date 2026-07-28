@@ -36,6 +36,32 @@ android {
         versionName = "0.1.3"
     }
 
+    /**
+     * Two builds from one source tree.
+     *
+     * `privacy` is the product as described: no `INTERNET` permission, so the guarantee is enforced
+     * by the OS rather than promised in a policy. It stays the default.
+     *
+     * `cloud` trades that for remote classification and sync. It gets a different application id
+     * and display name deliberately — installed side by side they must be distinguishable, and the
+     * build that gives something up should be the one that has to explain itself.
+     */
+    flavorDimensions += "privacy"
+
+    productFlavors {
+        create("privacy") {
+            dimension = "privacy"
+            isDefault = true
+            buildConfigField("boolean", "CLOUD_ENABLED", "false")
+        }
+        create("cloud") {
+            dimension = "privacy"
+            applicationIdSuffix = ".cloud"
+            versionNameSuffix = "-cloud"
+            buildConfigField("boolean", "CLOUD_ENABLED", "true")
+        }
+    }
+
     signingConfigs {
         if (releaseKeystore != null) {
             create("release") {

@@ -8,6 +8,8 @@ import com.deepak.umber.ingest.IngestPipeline
 import com.deepak.umber.ingest.SmsBackfill
 import com.deepak.umber.location.LocationCache
 import com.deepak.umber.ml.Classifier
+import com.deepak.umber.remote.RemoteClassifier
+import com.deepak.umber.remote.RemoteClassifierFactory
 import com.deepak.umber.widget.WidgetUpdater
 import com.deepak.umber.work.RollupWorker
 import kotlinx.coroutines.CoroutineScope
@@ -36,6 +38,12 @@ class AppContainer(context: Context) {
         modelDao = database.modelState(),
         txnDao = database.txns(),
     )
+
+    /**
+     * Null in the privacy flavour, which has no INTERNET permission and therefore no way to reach
+     * one. Everything downstream depends on the interface, not the build.
+     */
+    val remoteClassifier: RemoteClassifier? = RemoteClassifierFactory.create(context)
 
     val ingest = IngestPipeline(database, classifier, locationCache)
 

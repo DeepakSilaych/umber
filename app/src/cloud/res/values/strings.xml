@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Overrides the main source set, so the two builds are distinguishable on one home screen. -->
+    <string name="app_name">Umber Sync</string>
+    <string name="widget_label">Spending (Sync)</string>
+</resources>

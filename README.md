@@ -77,6 +77,29 @@ to learn from.
 > sideloading. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#ingestion-sources) for the
 > notification-based path that would be needed for Play distribution.
 
+## Two builds
+
+| | `privacy` | `cloud` |
+|---|---|---|
+| Package | `com.deepak.umber` | `com.deepak.umber.cloud` |
+| Name | Umber | Umber Sync |
+| `INTERNET` permission | **absent** | present |
+| Classification | fully on-device | remote, falling back to on-device |
+
+```bash
+./gradlew assemblePrivacyRelease     # the default, and what Releases ship
+./gradlew assembleCloudRelease
+```
+
+**`privacy` is the default and is what the Releases page ships.** Its guarantee is enforced by the
+OS: no `INTERNET` permission means the process cannot open a socket, whatever the code says.
+
+`cloud` trades that for remote classification and (eventually) sync and a web dashboard. Different
+application id and display name on purpose, so the two are distinguishable when installed side by
+side. **It sends the full text of bank messages off the device** — account numbers, balances and
+all — and will say so in its own UI before doing anything. It is currently a stub: the flavour split
+exists, no transport does.
+
 ## Staying up to date
 
 Umber cannot check for updates itself — it has no network access, which is the whole point. Two

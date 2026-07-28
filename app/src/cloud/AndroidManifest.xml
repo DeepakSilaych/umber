@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!--
+      Present ONLY in the cloud flavour. The privacy flavour's manifest has no INTERNET permission,
+      which is what makes its guarantee enforceable by the OS rather than a claim in a policy.
+    -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
+</manifest>
