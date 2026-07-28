@@ -55,11 +55,20 @@ data class RawMessageEntity(
         Index(value = ["merchantNorm"]),
         Index(value = ["needsReview"]),
         Index(value = ["rawMessageId"]),
+        Index(value = ["clientId"], unique = true),
     ],
 )
 data class TxnEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val rawMessageId: Long,
+
+    /**
+     * Stable identity across devices and reinstalls.
+     *
+     * [id] is a local autoincrement and would collide immediately between two installs, so it can
+     * never be the sync key. Generated once at insert and never rewritten.
+     */
+    val clientId: String,
 
     val amountPaise: Long,
     val direction: Direction,

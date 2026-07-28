@@ -176,6 +176,7 @@ class IngestPipeline(
         val txnId = db.txns().insert(
             TxnEntity(
                 rawMessageId = rawId,
+                clientId = java.util.UUID.randomUUID().toString(),
                 amountPaise = record.amountPaise,
                 direction = record.direction,
                 channel = record.channel,
