@@ -500,3 +500,61 @@ class TestFormatSniffing:
         result = parse_statement(data)
         assert result.rows == []
         assert result.problem is not None
+
+
+# --- regression: SBI's real narration format (found via a real statement upload) ------------------
+#
+# SBI inserts a direction/type tag between the UPI marker and the reference ("UPI/DR/<ref>/..."),
+# and appends a fixed teller/branch suffix to every narration ("<acct-ref> AT <code> <branch>").
+# Both defeated the original marker-then-digits reference regex and the merchant letter-count
+# heuristic respectively — the reference bug is the serious one: it silently made most rows share
+# one of a handful of fake "reference" values, which would collide against the server's global
+# unique reference index and drop real transactions as false duplicates on import.
+
+SBI_STYLE_CSV = (
+    "Date,Details,Ref No/Cheque No,Debit,Credit,Balance\n"
+    "01/04/2026, WDL TFR   UPI/DR/609195951332/SBI card/KKBK/sbicardp.b/Pay   0097692162094 AT 11309 PILANI,,2025.00,,28447.04\n"
+    "01/04/2026, WDL TFR   UPI/DR/609193089121/SBI card/KKBK/sbicardp.b/Pay   0097692162094 AT 11309 PILANI,,2025.00,,26422.04\n"
+    "01/04/2026, WDL TFR   UPI/DR/609102594284/ZEPTO/HDFC/zepto.payu/UPI   0097692162094 AT 11309 PILANI,,105.00,,26317.04\n"
+    "03/04/2026, WDL TFR   UPI/DR/109515786107/MOHAMMED/ICIC/nasirshaik/na   0097694162092 AT 11309 PILANI,,1100.00,,94895.04\n"
+    "02/04/2026, DEP TFR   NEFT*IDFB0010201*IDFBH26092821888*RZPX PVT LTD PA   0099509044300 AT 11309 PILANI,,,68600.00,94610.04\n"
+)
+
+
+class TestSbiNarrationFormat:
+    def test_reference_extracted_despite_dr_tag_between_marker_and_digits(self):
+        rows = parse_statement(SBI_STYLE_CSV.encode("utf-8")).rows
+        assert rows[0].reference == "609195951332"
+        assert rows[1].reference == "609193089121"
+        assert rows[2].reference == "609102594284"
+
+    def test_distinct_transactions_get_distinct_references_not_the_shared_branch_suffix(self):
+        """The bug: every row here shares the same trailing '0097692162094 AT 11309 PILANI'
+        boilerplate. Before the fix, all four UPI rows extracted that shared number as their
+        "reference" instead of the real per-transaction one right after UPI/DR/."""
+        rows = parse_statement(SBI_STYLE_CSV.encode("utf-8")).rows
+        refs = [r.reference for r in rows if r.reference]
+        assert len(refs) == len(set(refs)), f"references collided: {refs}"
+        assert "0097692162094" not in refs
+
+    def test_neft_star_delimited_reference_is_not_misextracted(self):
+        """NEFT*<ifsc>*<utr>*<name> has no reliable single-token reference adjacent to the marker
+        (the IFSC sits between NEFT and the real UTR) — no reference is safer than a wrong one."""
+        rows = parse_statement(SBI_STYLE_CSV.encode("utf-8")).rows
+        assert rows[4].reference is None
+
+    def test_merchant_is_not_the_trailing_branch_suffix(self):
+        rows = parse_statement(SBI_STYLE_CSV.encode("utf-8")).rows
+        for row in rows:
+            assert row.merchant_raw is not None
+            assert "PILANI" not in row.merchant_raw
+            assert "0097692162094" not in row.merchant_raw
+            assert "0097694162092" not in row.merchant_raw
+
+    def test_merchant_is_not_the_wdl_tfr_upi_prefix(self):
+        """"WDL TFR   UPI" out-letter-counts the real merchant segment purely by being a 3-word
+        compound — none of its words are boilerplate on their own, so whole-segment scheme-word
+        matching doesn't catch it; only per-word stripping does."""
+        rows = parse_statement(SBI_STYLE_CSV.encode("utf-8")).rows
+        for row in rows:
+            assert row.merchant_raw.strip().upper() != "WDL TFR   UPI"

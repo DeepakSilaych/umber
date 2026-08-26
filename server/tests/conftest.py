@@ -55,6 +55,9 @@ from sqlalchemy.orm import sessionmaker  # noqa: E402
 
 from app.config import get_settings  # noqa: E402
 from app.db.base import Base  # noqa: E402
+import app.db.models  # noqa: E402, F401 — populates Base.metadata even if the running test file
+# (e.g. test_parsing.py, filtered with -k) never imports the ORM models itself; without this,
+# `clean_db`'s TRUNCATE below silently becomes a no-op table list when it happens to run first.
 
 
 @pytest.fixture(autouse=True)

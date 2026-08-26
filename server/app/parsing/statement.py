@@ -47,8 +47,31 @@ REF_KEYS = [
 # Anchoring is essential: narrations also contain account numbers of similar length, and mistaking
 # one for a reference would merge unrelated transactions — a far worse outcome than simply not
 # finding a reference.
+#
+# Some banks (confirmed on SBI) insert a short letters-only direction/type tag between the scheme
+# marker and the actual reference — "UPI/DR/609195951332/...", "UPI/CR/...", "UPI/DRC/...",
+# "UPI/REVERSAL/...", "UPI/ONLINEREF/...". Without skipping that tag, the marker+separator+digits
+# match fails at the first (correct) occurrence and the search falls through to a LATER, unrelated
+# number elsewhere in the narration — observed in practice as every row matching the same trailing
+# teller/branch reference number that's appended to every narration regardless of transaction,
+# collapsing dozens of distinct transactions onto a handful of "reference" values. Since reference
+# doubles as a global dedup key, that's not a cosmetic miss, it's silent data loss on import — most
+# of those transactions would be rejected as duplicates of the first one seen. The optional tag
+# group below is what prevents that.
 _NARRATION_REF = re.compile(
-    r"\b(?:UPI|IMPS|NEFT|RTGS|UTR|RRN|MMT|ACH)[\s/:\-]{1,3}([A-Z0-9]{8,22})", re.IGNORECASE
+    r"\b(?:UPI|IMPS|NEFT|RTGS|UTR|RRN|MMT|ACH)(?:[\s/:\-]{1,3}[A-Z]{2,12})?[\s/:\-]{1,3}([A-Z0-9]{8,22})",
+    re.IGNORECASE,
+)
+
+# Some banks (confirmed on SBI) append a fixed teller/branch suffix to every narration —
+# "<account-ref digits> AT <branch code> <branch name>" — regardless of the actual transaction.
+# Left in place, this boilerplate's letter-dense branch name routinely out-scores the real
+# merchant segment in `_merchant_from`'s "most letters wins" heuristic, producing a merchant name
+# that's just the branch. Stripped only for merchant extraction — channel/reference detection look
+# at the untouched narration, since this suffix never contains scheme markers or the transaction
+# reference itself.
+_TRAILING_BRANCH_SUFFIX = re.compile(
+    r"\s{1,4}\d{10,16}\s+AT\s+\d+\s+[A-Za-z]+(?:\s+[A-Za-z]+)*\s*$", re.IGNORECASE
 )
 
 _HEADER_SEARCH_DEPTH = 30
@@ -56,6 +79,11 @@ _HEADER_SEARCH_DEPTH = 30
 _SCHEME_WORDS = {
     "upi", "imps", "neft", "rtgs", "ach", "pos", "atm", "mmt", "inb", "nwd",
     "dr", "cr", "p2a", "p2m", "payment", "transfer", "txn",
+    # Transaction-type prefix words (confirmed on SBI: "WDL TFR", "DEP TFR", "CEMTEX DEP" open
+    # nearly every narration). These matter at the *word* level, not just whole-segment — see
+    # `_merchant_from`'s per-word stripping below, since a segment like "WDL TFR   UPI" is itself a
+    # multi-word compound that never exact-matches a single scheme word.
+    "wdl", "tfr", "dep",
 }
 
 _PAYMENT_TO_FROM = re.compile(r"^payment (?:to|from)\s+", re.IGNORECASE)
@@ -186,6 +214,17 @@ def _resolve_amount(
     return None
 
 
+def _non_scheme_letter_count(segment: str) -> int:
+    """Letters in `segment`, minus letters belonging to whole-word scheme-word tokens within it.
+
+    A segment can be a multi-word compound like "WDL TFR   UPI" that never exact-matches a single
+    scheme word as a whole, but is entirely boilerplate word-by-word — confirmed on SBI, where that
+    exact segment otherwise out-scores the real merchant segment elsewhere in the same narration on
+    raw letter count alone.
+    """
+    return sum(len(word) for word in re.findall(r"[A-Za-z]+", segment) if word.lower() not in _SCHEME_WORDS)
+
+
 def _merchant_from(narration: str) -> str | None:
     """Pulls a merchant out of a slash-delimited narration such as
     ``UPI/512345678902/PAYMENT TO SWIGGY`` by taking the most word-like segment.
@@ -193,18 +232,19 @@ def _merchant_from(narration: str) -> str | None:
     if narration.strip() == "":
         return None
 
+    narration = _TRAILING_BRANCH_SUFFIX.sub("", narration)
     segments = [s.strip() for s in re.split(r"[/|:]", narration)]
     candidates = [
         s
         for s in segments
         if len(s) >= 3
-        and sum(1 for c in s if c.isalpha()) >= 3
+        and _non_scheme_letter_count(s) >= 3
         and s.lower() not in _SCHEME_WORDS
     ]
     if not candidates:
         return None
 
-    best = max(candidates, key=lambda s: sum(1 for c in s if c.isalpha()))
+    best = max(candidates, key=_non_scheme_letter_count)
     result = _PAYMENT_TO_FROM.sub("", best).strip()[:60]
     return result if result != "" else None
 
