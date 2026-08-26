@@ -1,4 +1,13 @@
-import { BarChart3, PlusCircle, Receipt, Upload, type LucideIcon } from 'lucide-react'
+import {
+  BarChart3,
+  CalendarDays,
+  Landmark,
+  PlusCircle,
+  Receipt,
+  Target,
+  Upload,
+  type LucideIcon,
+} from 'lucide-react'
 
 export interface NavItem {
   to: string
@@ -27,7 +36,12 @@ export const navGroups: NavGroup[] = [
   },
   {
     label: 'Analytics',
-    items: [{ to: '/stats', label: 'Stats', icon: BarChart3 }],
+    items: [
+      { to: '/stats', label: 'Stats', icon: BarChart3 },
+      { to: '/calendar', label: 'Calendar', icon: CalendarDays },
+      { to: '/balances', label: 'Balances', icon: Landmark },
+      { to: '/goals', label: 'Goals', icon: Target },
+    ],
   },
 ]
 

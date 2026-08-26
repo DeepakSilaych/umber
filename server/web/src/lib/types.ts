@@ -66,3 +66,115 @@ export interface StatementImportResponse {
   needs_review: number
   problem: string | null
 }
+
+// --- Accounts ---------------------------------------------------------------
+
+export type AccountKind = 'BANK' | 'CREDIT_CARD' | 'WALLET' | 'CASH' | 'OTHER'
+
+export interface Account {
+  id: string
+  label: string
+  bank_name: string | null
+  kind: AccountKind
+  account_tail: string | null
+  opening_balance_paise: number
+  opening_balance_as_of: number
+  balance_paise: number // live-computed as of now
+  created_at: number
+  updated_at: number
+}
+
+export interface AccountListResponse {
+  items: Account[]
+}
+
+export interface AccountCreate {
+  label: string
+  bank_name?: string | null
+  kind: AccountKind
+  account_tail?: string | null
+  opening_balance_paise?: number
+}
+
+export interface BalanceSeriesPoint {
+  day_ms: number // IST midnight of the day
+  balance_paise: number // the day's closing balance for this account
+}
+
+export interface BalanceSeriesResponse {
+  account_id: string
+  points: BalanceSeriesPoint[]
+}
+
+// --- Stats timeline ---------------------------------------------------------
+
+export interface TimelineBucket {
+  bucket_start_ms: number // IST-midnight of the day for granularity=day
+  bucket_end_ms: number
+  gross_spend_paise: number
+  reimbursed_paise: number
+  net_spend_paise: number
+  income_paise: number
+  transaction_count: number
+  needs_review_count: number
+  breakdown: Record<string, number> | null
+}
+
+export interface TimelineResponse {
+  from_ms: number
+  to_ms: number
+  granularity: string
+  group_by: string | null
+  account_id: string | null
+  series_keys: string[] | null
+  buckets: TimelineBucket[]
+}
+
+// --- Budget -----------------------------------------------------------------
+
+export type BucketKind = 'spend' | 'savings'
+
+export interface BudgetBucket {
+  id: string
+  name: string
+  monthly_target_paise: number
+  category_keys: string[]
+  kind: BucketKind
+  sort_order: number
+}
+
+export interface BudgetOut {
+  monthly_income_paise: number
+  buckets: BudgetBucket[]
+}
+
+export interface BudgetBucketProgress {
+  id: string
+  name: string
+  kind: BucketKind
+  category_keys: string[]
+  target_paise: number
+  actual_paise: number
+}
+
+export interface BudgetProgressResponse {
+  period: string
+  from_ms: number
+  to_ms: number
+  monthly_income_paise: number
+  total_spent_paise: number
+  unbudgeted_paise: number
+  buckets: BudgetBucketProgress[]
+}
+
+export interface BudgetBucketInput {
+  name: string
+  monthly_target_paise: number
+  category_keys: string[]
+  kind: BucketKind
+  sort_order: number
+}
+
+export type BudgetBucketPatch = Partial<BudgetBucketInput>
+
+export type BudgetPeriod = 'this_month' | 'last_month' | 'this_year'

@@ -1,6 +1,16 @@
 import type {
+  Account,
+  AccountCreate,
+  AccountListResponse,
+  BalanceSeriesResponse,
+  BudgetBucket,
+  BudgetBucketInput,
+  BudgetBucketPatch,
+  BudgetOut,
+  BudgetProgressResponse,
   StatementImportResponse,
   StatsResponse,
+  TimelineResponse,
   TransactionCreate,
   TransactionListResponse,
   TransactionPatch,
@@ -123,11 +133,100 @@ export function getStats(period: string): Promise<StatsResponse> {
   return request(`/v1/stats?period=${encodeURIComponent(period)}`)
 }
 
-export function importStatement(file: File): Promise<StatementImportResponse> {
+export function importStatement(file: File, accountId?: string): Promise<StatementImportResponse> {
   const form = new FormData()
   form.append('file', file)
+  if (accountId) form.append('account_id', accountId)
   return request('/v1/statements/import', {
     method: 'POST',
     body: form,
+  })
+}
+
+// --- Accounts ---------------------------------------------------------------
+
+export function listAccounts(): Promise<AccountListResponse> {
+  return request('/v1/accounts')
+}
+
+export function createAccount(body: AccountCreate): Promise<Account> {
+  return request('/v1/accounts', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  })
+}
+
+export function getBalanceSeries(accountId: string): Promise<BalanceSeriesResponse> {
+  return request(`/v1/accounts/${encodeURIComponent(accountId)}/balance-series`)
+}
+
+// --- Stats timeline ---------------------------------------------------------
+
+export interface TimelineParams {
+  granularity?: 'day' | 'week' | 'month'
+  from_ms?: number
+  to_ms?: number
+  account_id?: string
+  group_by?: 'category' | 'merchant' | 'channel'
+}
+
+export function getTimeline(params: TimelineParams = {}): Promise<TimelineResponse> {
+  const search = new URLSearchParams()
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined && value !== null && value !== '') {
+      search.set(key, String(value))
+    }
+  }
+  const qs = search.toString()
+  return request(`/v1/stats/timeline${qs ? `?${qs}` : ''}`)
+}
+
+// --- Budget -----------------------------------------------------------------
+
+export function getBudget(): Promise<BudgetOut> {
+  return request('/v1/budget')
+}
+
+export function patchBudgetIncome(monthlyIncomePaise: number): Promise<BudgetOut> {
+  return request('/v1/budget', {
+    method: 'PATCH',
+    body: JSON.stringify({ monthly_income_paise: monthlyIncomePaise }),
+  })
+}
+
+export interface BudgetProgressParams {
+  period?: string
+  from_ms?: number
+  to_ms?: number
+}
+
+export function getBudgetProgress(params: BudgetProgressParams = {}): Promise<BudgetProgressResponse> {
+  const search = new URLSearchParams()
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined && value !== null && value !== '') {
+      search.set(key, String(value))
+    }
+  }
+  const qs = search.toString()
+  return request(`/v1/budget/progress${qs ? `?${qs}` : ''}`)
+}
+
+export function createBudgetBucket(body: BudgetBucketInput): Promise<BudgetBucket> {
+  return request('/v1/budget/buckets', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  })
+}
+
+export function patchBudgetBucket(bucketId: string, patch: BudgetBucketPatch): Promise<BudgetBucket> {
+  return request(`/v1/budget/buckets/${encodeURIComponent(bucketId)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(patch),
+  })
+}
+
+export function deleteBudgetBucket(bucketId: string): Promise<void> {
+  return request(`/v1/budget/buckets/${encodeURIComponent(bucketId)}`, {
+    method: 'DELETE',
   })
 }

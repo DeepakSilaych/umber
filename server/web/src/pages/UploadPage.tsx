@@ -1,15 +1,19 @@
-import { type ChangeEvent, type DragEvent, useRef, useState } from 'react'
+import { type ChangeEvent, type DragEvent, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { TriangleAlertIcon, UploadCloudIcon } from 'lucide-react'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
+import { Label } from '@/components/ui/label'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import ErrorAlert from '@/components/ErrorAlert'
-import { ApiError, importStatement } from '@/lib/api'
+import { ApiError, importStatement, listAccounts } from '@/lib/api'
 import { cn } from '@/lib/utils'
-import type { StatementImportResponse } from '@/lib/types'
+import type { Account, StatementImportResponse } from '@/lib/types'
 
 const ACCEPTED_EXTENSIONS = ['.xlsx', '.csv', '.tsv']
+// Radix Select forbids an empty-string item value, so "no account" uses this sentinel.
+const UNASSIGNED = '__unassigned__'
 
 function isAccepted(file: File): boolean {
   const name = file.name.toLowerCase()
@@ -22,7 +26,23 @@ export default function UploadPage() {
   const [error, setError] = useState<string | null>(null)
   const [result, setResult] = useState<StatementImportResponse | null>(null)
   const [fileName, setFileName] = useState<string | null>(null)
+  const [accounts, setAccounts] = useState<Account[]>([])
+  const [accountId, setAccountId] = useState<string>(UNASSIGNED)
   const inputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    listAccounts()
+      .then((res) => {
+        if (!cancelled) setAccounts(res.items)
+      })
+      .catch(() => {
+        // Account list is optional context for the upload; ignore load failures silently.
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   async function handleFile(file: File) {
     setError(null)
@@ -34,7 +54,7 @@ export default function UploadPage() {
     setFileName(file.name)
     setUploading(true)
     try {
-      const res = await importStatement(file)
+      const res = await importStatement(file, accountId === UNASSIGNED ? undefined : accountId)
       setResult(res)
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Upload failed.')
@@ -63,6 +83,29 @@ export default function UploadPage() {
         Import a bank statement (.xlsx, .csv, or .tsv). Rows that match an existing merchant get their known category
         automatically; anything new is flagged for review.
       </p>
+
+      <div className="mb-4 space-y-1.5">
+        <Label htmlFor="upload-account">
+          Account <span className="font-normal text-muted-foreground">(optional)</span>
+        </Label>
+        <Select value={accountId} onValueChange={setAccountId}>
+          <SelectTrigger id="upload-account" className="w-full sm:w-72">
+            <SelectValue placeholder="Unassigned" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={UNASSIGNED}>Unassigned</SelectItem>
+            {accounts.map((account) => (
+              <SelectItem key={account.id} value={account.id}>
+                {account.label}
+                {account.bank_name ? ` · ${account.bank_name}` : ''}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <p className="text-xs text-muted-foreground">
+          Imported rows will be linked to this account.
+        </p>
+      </div>
 
       <Card
         onDragOver={(e: DragEvent<HTMLDivElement>) => {

@@ -6,6 +6,9 @@ import TransactionsPage from './pages/TransactionsPage'
 import UploadPage from './pages/UploadPage'
 import StatsPage from './pages/StatsPage'
 import ManualEntryPage from './pages/ManualEntryPage'
+import CalendarPage from './pages/CalendarPage'
+import BalancesPage from './pages/BalancesPage'
+import GoalsPage from './pages/GoalsPage'
 
 function App() {
   return (
@@ -17,6 +20,9 @@ function App() {
             <Route path="/" element={<TransactionsPage />} />
             <Route path="/upload" element={<UploadPage />} />
             <Route path="/stats" element={<StatsPage />} />
+            <Route path="/calendar" element={<CalendarPage />} />
+            <Route path="/balances" element={<BalancesPage />} />
+            <Route path="/goals" element={<GoalsPage />} />
             <Route path="/add" element={<ManualEntryPage />} />
           </Route>
         </Routes>
