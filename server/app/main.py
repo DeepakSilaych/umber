@@ -2,8 +2,9 @@ import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.config import get_settings
@@ -66,4 +67,18 @@ def healthz() -> dict:
 # so `uvicorn app.main:app` still works against the API alone (run the Vite dev server separately).
 _dist = Path(__file__).resolve().parent.parent / "web" / "dist"
 if _dist.is_dir():
-    app.mount("/", StaticFiles(directory=_dist, html=True), name="dashboard")
+    app.mount("/assets", StaticFiles(directory=_dist / "assets"), name="dashboard-assets")
+
+    @app.get("/favicon.svg", include_in_schema=False)
+    def _favicon() -> FileResponse:
+        return FileResponse(_dist / "favicon.svg")
+
+    # React Router routes (e.g. /login, /accounts) exist only client-side — a direct load or a
+    # full-page redirect to one of them (see web/src/lib/api.ts's 401 handler) hits this server
+    # first, so every non-API GET must fall back to index.html and let the SPA's own router take
+    # over. Registered last: every real API route above still matches before this catch-all does.
+    @app.get("/{full_path:path}", include_in_schema=False)
+    def _spa_fallback(full_path: str) -> FileResponse:
+        if full_path.startswith(("v1/", "docs", "openapi.json", "redoc", "healthz")):
+            raise HTTPException(status_code=404)
+        return FileResponse(_dist / "index.html")
