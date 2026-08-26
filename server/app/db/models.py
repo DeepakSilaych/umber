@@ -69,6 +69,10 @@ class Transaction(Base):
     # Never synced to or from the phone — see TxnOutDetailed vs TxnOut in schemas.py.
     subcategory: Mapped[str | None] = mapped_column(Text, nullable=True)
     needs_review: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # Statement row order, monotonic across imports. A whole import batch shares one `created_at`,
+    # so without this the file order (needed to pick a day's *closing* balance for the balance
+    # chart) is unrecoverable. Null for rows that never came from a statement (phone SMS, manual).
+    import_seq: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
 
     updated_at: Mapped[int] = mapped_column(BigInteger, nullable=False)
     created_at: Mapped[int] = mapped_column(BigInteger, nullable=False)
@@ -88,7 +92,7 @@ class Transaction(Base):
         Index("ix_txn_occurred", "occurred_at"),
         Index("ix_txn_merchant_norm", "merchant_norm"),
         Index("ix_txn_needs_review", "needs_review"),
-        Index("ix_txn_account_occurred", "account_id", "occurred_at"),
+        Index("ix_txn_account_occurred", "account_id", "occurred_at", "import_seq"),
         Index("ix_txn_subcategory", "subcategory", postgresql_where=text("subcategory IS NOT NULL")),
     )
 
@@ -164,3 +168,36 @@ class InsightsCache(Base):
     suggestions: Mapped[list] = mapped_column(JSON, nullable=False)
     model: Mapped[str] = mapped_column(Text, nullable=False)
     generated_at: Mapped[int] = mapped_column(BigInteger, nullable=False)
+
+
+class BudgetConfig(Base):
+    """Single-row table (id always 1) — the monthly plan's top-level income figure. Single-user
+    app, so a one-row config table is simpler than a settings key-value store."""
+
+    __tablename__ = "budget_config"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, default=1)
+    monthly_income_paise: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    updated_at: Mapped[int] = mapped_column(BigInteger, nullable=False)
+
+    __table_args__ = (CheckConstraint("id = 1", name="ck_budget_config_singleton"),)
+
+
+class BudgetBucket(Base):
+    """One line of the monthly budget. Bucket-based (matching the user's Obsidian plan), not
+    per-category — each bucket rolls up zero or more of the 15 fixed categories. `kind='spend'`
+    tracks actual spend in its categories against the target; `kind='savings'` tracks leftover
+    (income minus total outflow) against the target and has no categories."""
+
+    __tablename__ = "budget_buckets"
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    monthly_target_paise: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    category_keys: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    kind: Mapped[str] = mapped_column(Text, nullable=False, default="spend")
+    sort_order: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    created_at: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    updated_at: Mapped[int] = mapped_column(BigInteger, nullable=False)
+
+    __table_args__ = (CheckConstraint("kind in ('spend','savings')", name="ck_budget_bucket_kind"),)

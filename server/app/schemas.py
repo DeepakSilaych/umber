@@ -502,3 +502,105 @@ class ClassifyResponse(BaseModel):
     merchants_classified: int
     transactions_updated: int
     failed_batches: int
+
+
+# --- Account balance series ----------------------------------------------------
+
+
+class BalanceSeriesPoint(BaseModel):
+    day_ms: int  # IST midnight of the day
+    balance_paise: int  # the day's closing balance for this account
+
+
+class BalanceSeriesResponse(BaseModel):
+    account_id: str
+    points: list[BalanceSeriesPoint]
+
+
+# --- Budget --------------------------------------------------------------------
+
+
+class BudgetBucketIn(BaseModel):
+    name: str
+    monthly_target_paise: int = Field(ge=0)
+    category_keys: list[str] = Field(default_factory=list)
+    kind: str = "spend"
+    sort_order: int = 0
+
+    @field_validator("kind")
+    @classmethod
+    def _kind(cls, v: str) -> str:
+        if v not in ("spend", "savings"):
+            raise ValueError("kind must be 'spend' or 'savings'")
+        return v
+
+    @field_validator("category_keys")
+    @classmethod
+    def _category_keys(cls, v: list[str]) -> list[str]:
+        for c in v:
+            if not is_valid(c):
+                raise ValueError(f"unknown category: {c}")
+        return v
+
+
+class BudgetBucketPatch(BaseModel):
+    name: str | None = None
+    monthly_target_paise: int | None = Field(default=None, ge=0)
+    category_keys: list[str] | None = None
+    kind: str | None = None
+    sort_order: int | None = None
+
+    @field_validator("kind")
+    @classmethod
+    def _kind(cls, v: str | None) -> str | None:
+        if v is not None and v not in ("spend", "savings"):
+            raise ValueError("kind must be 'spend' or 'savings'")
+        return v
+
+    @field_validator("category_keys")
+    @classmethod
+    def _category_keys(cls, v: list[str] | None) -> list[str] | None:
+        if v is not None:
+            for c in v:
+                if not is_valid(c):
+                    raise ValueError(f"unknown category: {c}")
+        return v
+
+
+class BudgetBucketOut(BaseModel):
+    id: str
+    name: str
+    monthly_target_paise: int
+    category_keys: list[str]
+    kind: str
+    sort_order: int
+
+    model_config = {"from_attributes": True}
+
+
+class BudgetIncomePatch(BaseModel):
+    monthly_income_paise: int = Field(ge=0)
+
+
+class BudgetOut(BaseModel):
+    monthly_income_paise: int
+    buckets: list[BudgetBucketOut]
+
+
+class BudgetBucketProgress(BaseModel):
+    id: str
+    name: str
+    kind: str
+    category_keys: list[str]
+    target_paise: int
+    actual_paise: int
+
+
+class BudgetProgressResponse(BaseModel):
+    period: str
+    from_ms: int
+    to_ms: int
+    monthly_income_paise: int
+    total_spent_paise: int
+    unbudgeted_paise: int
+    buckets: list[BudgetBucketProgress]

@@ -1,5 +1,7 @@
 import time
 import uuid
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import case, func, select
@@ -15,8 +17,12 @@ from app.schemas import (
     AccountListResponse,
     AccountOut,
     AccountPatch,
+    BalanceSeriesPoint,
+    BalanceSeriesResponse,
     RelinkAccountsResponse,
 )
+
+TZ = ZoneInfo("Asia/Kolkata")
 
 router = APIRouter(prefix="/v1/accounts", tags=["accounts"])
 
@@ -180,3 +186,46 @@ def account_balance(
         balance_paise=account.opening_balance_paise + delta,
         transaction_count=count,
     )
+
+
+@router.get("/{account_id}/balance-series", response_model=BalanceSeriesResponse)
+def account_balance_series(
+    account_id: str, db: Session = Depends(get_db), _actor: Actor = Depends(get_actor)
+) -> BalanceSeriesResponse:
+    """Daily closing-balance time series for an account, straight from each statement row's
+    recorded running `balance_paise` (not recomputed). Statements are date-only, so several rows
+    can share a day at noon; the day's *closing* balance is the row with the highest `import_seq`
+    (statement file order). Rows with no recorded balance are ignored."""
+    if db.get(Account, account_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Account not found")
+
+    rows = (
+        db.execute(
+            select(Transaction.occurred_at, Transaction.balance_paise, Transaction.import_seq)
+            .where(
+                Transaction.account_id == account_id,
+                Transaction.balance_paise.isnot(None),
+            )
+            .order_by(Transaction.occurred_at.asc())
+        )
+        .all()
+    )
+
+    # Collapse to one closing balance per IST day: keep the row with the greatest import_seq
+    # (falling back to insertion order when import_seq is null, which shouldn't happen for
+    # statement rows but keeps this robust).
+    by_day: dict[int, tuple[int, int]] = {}  # day_ms -> (import_seq_or_-1, balance_paise)
+    for occurred_at, balance_paise, import_seq in rows:
+        day = datetime.fromtimestamp(occurred_at / 1000, tz=TZ).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
+        day_ms = int(day.timestamp() * 1000)
+        seq = import_seq if import_seq is not None else -1
+        if day_ms not in by_day or seq >= by_day[day_ms][0]:
+            by_day[day_ms] = (seq, balance_paise)
+
+    points = [
+        BalanceSeriesPoint(day_ms=day_ms, balance_paise=bal)
+        for day_ms, (_seq, bal) in sorted(by_day.items())
+    ]
+    return BalanceSeriesResponse(account_id=account_id, points=points)

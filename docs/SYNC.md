@@ -224,6 +224,12 @@ it only ever wrote a bare `account_tail` (last-4 digits) string onto each transa
 - `GET/PATCH/DELETE /v1/accounts/{id}` — delete unlinks (`ON DELETE SET NULL`) rather than deleting
   the transactions themselves; real financial history is never destroyed by an account edit.
 - `GET /v1/accounts/{id}/balance?as_of=` — balance as of a specific point in time.
+- `GET /v1/accounts/{id}/balance-series` — daily closing-balance time series from each statement
+  row's recorded running `balance_paise` (not recomputed). Statements are date-only, so a day's
+  closing balance is the row with the highest `import_seq` (statement file order). Powers the
+  balance chart.
+- `POST /v1/statements/import` also accepts an optional `account_id` form field — when set, every
+  imported row is tagged to that account (and gets a monotonic `import_seq`).
 - `POST /v1/accounts/relink` — idempotent backfill: re-runs the auto-link rule (a transaction's
   `account_tail` matches *exactly one* account, never a guess) over every unlinked transaction. Not
   an Alembic migration, since accounts don't exist yet at schema-migration time — call this after
@@ -290,6 +296,21 @@ bypasses the cache. On any gateway failure or unparseable response, **never a 50
 a deterministic server-computed summary sentence with empty `suggestions` and `llm_generated: false`;
 fallbacks are never cached, so the next call retries the gateway. Gated to dashboard/agent tokens
 only (a real per-call cost, unlike the read-only stats endpoints above).
+
+---
+
+## Budget / monthly goal
+
+Dashboard-only, bucket-based (matching the user's own plan) — each bucket rolls up 0+ of the 15
+categories; income is a single figure. Base path `/v1/budget`.
+
+- `GET /v1/budget` → `{ monthly_income_paise, buckets: [...] }`. `PATCH /v1/budget` sets income.
+- `POST /v1/budget/buckets`, `PATCH/DELETE /v1/budget/buckets/{id}` — bucket CRUD (name, target,
+  `category_keys` (validated ∈ the 15 categories), `kind` `spend`|`savings`, sort order).
+- `GET /v1/budget/progress?period=` → per-bucket `target` vs `actual` for the window (a `spend`
+  bucket's actual = net spend in its categories; a `savings` bucket's = income − total outflow),
+  plus `total_spent_paise` and `unbudgeted_paise` (spend in categories mapped to no bucket).
+  Net-of-reimbursement, reusing the `/v1/stats` netting basis; Income excluded from outflow.
 
 ### `POST /v1/statements/import`
 
@@ -392,6 +413,9 @@ CREATE TABLE transactions (
   -- Never synced to or from the phone.
   subcategory     TEXT,
   needs_review    BOOLEAN NOT NULL DEFAULT true,
+  -- Statement row order, monotonic across imports. A whole import batch shares one created_at, so
+  -- this is what lets the balance chart pick a day's *closing* balance. Null for non-statement rows.
+  import_seq      BIGINT,
   updated_at      BIGINT NOT NULL,
   created_at      BIGINT NOT NULL
 );
@@ -459,6 +483,25 @@ CREATE TABLE insights_cache (
   model           TEXT   NOT NULL,
   generated_at    BIGINT NOT NULL,
   PRIMARY KEY (period, from_ms, to_ms, stats_hash)
+);
+
+-- Monthly budget / financial goal (dashboard only, no phone concept). Bucket-based, matching the
+-- user's own plan: each bucket rolls up 0+ of the 15 categories. income is a one-row singleton.
+CREATE TABLE budget_config (
+  id                    BIGINT PRIMARY KEY CHECK (id = 1),
+  monthly_income_paise  BIGINT NOT NULL DEFAULT 0,
+  updated_at            BIGINT NOT NULL
+);
+
+CREATE TABLE budget_buckets (
+  id                    TEXT PRIMARY KEY,
+  name                  TEXT NOT NULL,
+  monthly_target_paise  BIGINT NOT NULL DEFAULT 0,
+  category_keys         JSON NOT NULL DEFAULT '[]',   -- category strings this bucket rolls up
+  kind                  TEXT NOT NULL CHECK (kind IN ('spend','savings')),  -- savings = income − outflow
+  sort_order            BIGINT NOT NULL DEFAULT 0,
+  created_at            BIGINT NOT NULL,
+  updated_at            BIGINT NOT NULL
 );
 ```
 

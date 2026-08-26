@@ -4,14 +4,14 @@ from collections import defaultdict
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Depends, UploadFile
+from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.auth import Actor, require_dashboard_or_agent
 from app.categories import OTHER
 from app.db.base import get_db
-from app.db.models import Transaction
+from app.db.models import Account, Transaction
 from app.parsing.statement import parse_statement
 from app.schemas import StatementImportResponse
 
@@ -56,7 +56,11 @@ async def import_statement(
     file: UploadFile,
     db: Session = Depends(get_db),
     actor: Actor = Depends(require_dashboard_or_agent),
+    account_id: str | None = Form(default=None),
 ) -> StatementImportResponse:
+    if account_id is not None and db.get(Account, account_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Account not found")
+
     data = await file.read()
     result = parse_statement(data)
 
@@ -73,6 +77,12 @@ async def import_statement(
     inserted = 0
     skipped_duplicate = 0
     needs_review = 0
+
+    # Statement row order must be preserved (see Transaction.import_seq) so the balance chart can
+    # pick each day's closing balance. Continue the global monotonic sequence from wherever it left
+    # off, so rows stay ordered across separate imports too.
+    seq_base = db.execute(select(func.coalesce(func.max(Transaction.import_seq), 0))).scalar_one()
+    row_index = 0
 
     # Tier-3 same-day-occurrence dedup (docs/ARCHITECTURE.md#deduplication): the Nth identical
     # row in this import is a duplicate only once at least N such transactions already exist.
@@ -137,10 +147,12 @@ async def import_statement(
             row_needs_review = True
             needs_review += 1
 
+        row_index += 1
         db.add(
             Transaction(
                 client_id=str(uuid.uuid4()),
                 device_id=actor.device_id,
+                account_id=account_id,
                 occurred_at=row.occurred_at_ms,
                 amount_paise=row.amount_paise,
                 direction=row.direction,
@@ -153,6 +165,7 @@ async def import_statement(
                 category=category,
                 category_source=category_source,
                 needs_review=row_needs_review,
+                import_seq=seq_base + row_index,
                 updated_at=now_ms,
                 created_at=now_ms,
             )

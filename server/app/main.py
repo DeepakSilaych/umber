@@ -13,6 +13,7 @@ from app.db.models import Device
 from app.routers import (
     accounts,
     auth_router,
+    budget,
     classify,
     devices,
     holdings,
@@ -66,6 +67,7 @@ app.include_router(accounts.router)
 app.include_router(holdings.router)
 app.include_router(insights.router)
 app.include_router(classify.router)
+app.include_router(budget.router)
 
 
 @app.get("/healthz")
