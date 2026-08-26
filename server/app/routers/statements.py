@@ -26,7 +26,13 @@ def _day_bucket(occurred_at_ms: int) -> str:
 
 def _latest_known_category(db: Session, merchant_norm: str | None) -> str | None:
     """Server-side stand-in for the phone's merchant-memory layer 1: the most recent
-    user-or-memory-confirmed category already on file for this merchant, if any."""
+    confirmed category already on file for this merchant, if any.
+
+    "Confirmed" means a human picked it — USER/MEMORY (phone) or DASHBOARD (this same web UI's
+    own `PATCH /v1/transactions/{id}` category edit, or a prior statement-import auto-match — see
+    below). DASHBOARD must count here or the obvious workflow this whole endpoint exists for
+    (categorize one Zomato transaction by hand, then have every future Zomato import inherit it)
+    wouldn't work at all — every re-import would land back in the needs-review queue forever."""
     if not merchant_norm:
         return None
     row = (
@@ -34,7 +40,7 @@ def _latest_known_category(db: Session, merchant_norm: str | None) -> str | None
             select(Transaction)
             .where(
                 Transaction.merchant_norm == merchant_norm,
-                Transaction.category_source.in_(("USER", "MEMORY")),
+                Transaction.category_source.in_(("USER", "MEMORY", "DASHBOARD")),
             )
             .order_by(Transaction.updated_at.desc())
             .limit(1)
@@ -75,14 +81,27 @@ async def import_statement(
     signature_existing_counts: dict[tuple, int] = {}
     signature_seen_in_batch: dict[tuple, int] = defaultdict(int)
 
+    # The session only commits once, at the end of the loop (see below) — a mid-batch `select()`
+    # for a reference collision only ever sees previously *committed* rows, never a sibling row
+    # added earlier in this same file (the session's autoflush is off; see db/base.py). Without
+    # this, two rows in one file sharing a reference — a real dedup case, not a parsing bug —
+    # both pass their individual checks, both get staged, and the final commit fails outright on
+    # the DB's unique constraint, rolling back the *entire* import instead of skipping the one
+    # duplicate row.
+    seen_references: set[str] = set()
+
     for row in result.rows:
         if row.reference:
+            if row.reference in seen_references:
+                skipped_duplicate += 1
+                continue
             collision = db.execute(
                 select(Transaction).where(Transaction.reference == row.reference)
             ).scalar_one_or_none()
             if collision is not None:
                 skipped_duplicate += 1
                 continue
+            seen_references.add(row.reference)
         else:
             signature = (_day_bucket(row.occurred_at_ms), row.amount_paise, row.direction, row.merchant_norm)
             if signature not in signature_existing_counts:
