@@ -5,6 +5,11 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
+    // Only exercised by app/src/cloud (kotlinx.serialization @Serializable wire DTOs). Applying the
+    // compiler plugin project-wide costs nothing at runtime for the privacy flavour — it's the
+    // `cloudImplementation` dependency below that would actually pull a jar in, and privacy gets
+    // none of those.
+    alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.ksp)
 }
 
@@ -59,6 +64,9 @@ android {
             applicationIdSuffix = ".cloud"
             versionNameSuffix = "-cloud"
             buildConfigField("boolean", "CLOUD_ENABLED", "true")
+            // Overridable at runtime in a debug build (see Settings' debug-only endpoint field) so
+            // this can be pointed at a local dev server instead.
+            buildConfigField("String", "SYNC_BASE_URL", "\"https://finance.deepaksilaych.me\"")
         }
     }
 
@@ -136,6 +144,14 @@ dependencies {
 
     implementation(libs.androidx.glance.appwidget)
     implementation(libs.androidx.glance.material3)
+
+    // The cloud flavour's sync transport. Scoped with `cloudImplementation` so none of it — jars,
+    // transitive deps, anything — lands in the privacy flavour's build, per README's "Two builds".
+    "cloudImplementation"(libs.retrofit)
+    "cloudImplementation"(libs.retrofit.kotlinx.serialization.converter)
+    "cloudImplementation"(libs.okhttp)
+    "cloudImplementation"(libs.kotlinx.serialization.json)
+    "cloudImplementation"(libs.androidx.security.crypto)
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)

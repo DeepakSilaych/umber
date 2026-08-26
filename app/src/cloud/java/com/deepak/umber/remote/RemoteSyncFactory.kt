@@ -1,19 +1,17 @@
 package com.deepak.umber.remote
 
 import android.content.Context
+import com.deepak.umber.data.repo.UmberRepository
 
 /**
  * The cloud flavour's sync client.
  *
- * Currently a stub reporting itself disabled, so this build behaves identically to the privacy one
- * until a server exists. Deliberate: the flavour split and the wire contract land and are reviewable
- * before any transport, credentials or consent flow is written.
+ * Talks to the Umber server described in `docs/SYNC.md` once the user opts in. Disabled by
+ * default — [RemoteSync.status] starts with `enabled = false`, and [HttpRemoteSync] never opens a
+ * connection until Settings calls [RemoteSync.enable], per README's "will say so in its own UI
+ * before doing anything."
  */
 object RemoteSyncFactory {
-    fun create(context: Context): RemoteSync? = NotYetConfigured
-}
-
-private object NotYetConfigured : RemoteSync {
-    override val isEnabled: Boolean = false
-    override suspend fun sync(): SyncOutcome = SyncOutcome.Disabled
+    fun create(context: Context, repository: UmberRepository): RemoteSync =
+        HttpRemoteSync(context.applicationContext, repository)
 }

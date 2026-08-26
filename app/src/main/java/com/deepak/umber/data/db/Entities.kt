@@ -56,6 +56,7 @@ data class RawMessageEntity(
         Index(value = ["needsReview"]),
         Index(value = ["rawMessageId"]),
         Index(value = ["clientId"], unique = true),
+        Index(value = ["updatedAt"]),
     ],
 )
 data class TxnEntity(
@@ -96,6 +97,29 @@ data class TxnEntity(
 
     val parserVersion: Int,
     val createdAt: Long,
+
+    /**
+     * When this row last changed, in UTC milliseconds — set by whoever made the change. Drives sync
+     * conflict resolution (see `docs/SYNC.md`'s "last write wins within a tier" rule) and is what
+     * [syncedAt] is compared against to find rows a push hasn't caught up with yet.
+     *
+     * Bumped on creation and at every write path that changes `category`, `categorySource`,
+     * `merchantRaw` or `needsReview` — see `UmberRepository.confirmCategory`.
+     */
+    val updatedAt: Long = createdAt,
+
+    /**
+     * `updatedAt` as of the last successful push to the sync server, or null if this row has never
+     * been pushed.
+     *
+     * A row is "pending sync" exactly when `syncedAt` is null or older than `updatedAt` — cheap to
+     * query (see `TxnDao.pendingSync`) without a separate dirty-flag table, and it self-heals: a row
+     * edited again after a successful push simply becomes pending again the moment `updatedAt` moves
+     * past `syncedAt`.
+     *
+     * Only meaningful in the `cloud` flavour. Always null on `privacy`, which never syncs.
+     */
+    val syncedAt: Long? = null,
 )
 
 /**

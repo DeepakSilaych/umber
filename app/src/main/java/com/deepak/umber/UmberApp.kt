@@ -39,15 +39,18 @@ class AppContainer(context: Context) {
         txnDao = database.txns(),
     )
 
-    /**
-     * Null in the privacy flavour, which has no INTERNET permission and therefore no way to reach
-     * a server. Everything downstream depends on the interface, not on which build it is.
-     */
-    val remoteSync: RemoteSync? = RemoteSyncFactory.create(context)
-
     val ingest = IngestPipeline(database, classifier, locationCache)
 
     val repository = UmberRepository(database, classifier, ingest)
+
+    /**
+     * Null in the privacy flavour, which has no INTERNET permission and therefore no way to reach
+     * a server. Everything downstream depends on the interface, not on which build it is.
+     *
+     * Built after [repository] because the `cloud` implementation pushes/pulls through it rather
+     * than the DAOs directly, per ARCHITECTURE.md's "writes go through the repository" convention.
+     */
+    val remoteSync: RemoteSync? = RemoteSyncFactory.create(context, repository)
 
     val backfill = SmsBackfill(context, ingest)
 

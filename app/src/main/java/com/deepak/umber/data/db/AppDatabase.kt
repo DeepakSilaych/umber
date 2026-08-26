@@ -16,7 +16,7 @@ import androidx.room.TypeConverters
         ModelStateEntity::class,
         LastLocationEntity::class,
     ],
-    version = 2,
+    version = 3,
     exportSchema = false,
 )
 @TypeConverters(Converters::class)
@@ -44,6 +44,23 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * Adds `updatedAt` and `syncedAt` for cross-device sync (see `docs/SYNC.md`).
+         *
+         * Same backfill style as [MIGRATION_1_2]: existing rows get `updatedAt = createdAt` rather
+         * than being left at some sentinel, since every pre-sync row genuinely was last touched at
+         * creation time. `syncedAt` starts null for everyone, which is correct too — nothing has
+         * ever been pushed, so every existing row is pending on first sync, exactly as it should be.
+         */
+        val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE txn ADD COLUMN updatedAt INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("UPDATE txn SET updatedAt = createdAt")
+                db.execSQL("ALTER TABLE txn ADD COLUMN syncedAt INTEGER")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_txn_updatedAt ON txn (updatedAt)")
+            }
+        }
+
         @Volatile private var instance: AppDatabase? = null
 
         fun get(context: Context): AppDatabase = instance ?: synchronized(this) {
@@ -52,7 +69,7 @@ abstract class AppDatabase : RoomDatabase() {
                 AppDatabase::class.java,
                 "umber.db",
             )
-                .addMigrations(MIGRATION_1_2)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                 // Everything derived (transactions, model, merchant memory) can be rebuilt from
                 // raw_message, but raw_message itself cannot be recovered — so no destructive
                 // migration fallback. Add real migrations when the schema changes.

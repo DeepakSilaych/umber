@@ -1,0 +1,32 @@
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: umber
+      POSTGRES_PASSWORD: umber
+      POSTGRES_DB: umber
+    ports:
+      - "5432:5432"
+    volumes:
+      - umber-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U umber"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
+  api:
+    build: .
+    env_file:
+      - .env
+    environment:
+      UMBER_DATABASE_URL: postgresql+psycopg://umber:umber@postgres:5432/umber
+      UMBER_COOKIE_SECURE: "false"
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  umber-postgres-data:

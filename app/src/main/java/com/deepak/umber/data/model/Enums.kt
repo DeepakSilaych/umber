@@ -17,13 +17,26 @@ enum class Direction { DEBIT, CREDIT }
 
 enum class Channel { UPI, CARD, ATM, IMPS, NEFT, RTGS, NETBANKING, AUTOPAY, WALLET, UNKNOWN }
 
-/** Where a transaction's category came from. Drives the "trust" of the label. */
+/**
+ * Where a transaction's category came from. Drives the "trust" of the label.
+ *
+ * `DASHBOARD` and `REMOTE` only ever arrive from the sync server (see `docs/SYNC.md`'s conflict
+ * table) — nothing on-device ever sets them. `MEMORY` isn't in that table explicitly, but it is
+ * equal-priority with `USER` on the wire: a memory entry only exists because the user confirmed
+ * that merchant once, so it is the user's decision wearing a different source, not a separate one.
+ */
 enum class CategorySource {
     /** User explicitly picked it. Ground truth. */
     USER,
 
     /** Exact merchant match against a previously user-confirmed merchant. */
     MEMORY,
+
+    /** Edited in the web dashboard. Beats everything except a later `USER`/`MEMORY` edit. */
+    DASHBOARD,
+
+    /** Server-side LLM classification, applied as a background job after sync. */
+    REMOTE,
 
     /** On-device logistic regression, above the confidence threshold. */
     MODEL,

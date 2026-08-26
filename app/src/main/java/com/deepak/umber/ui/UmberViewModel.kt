@@ -17,6 +17,8 @@ import com.deepak.umber.data.repo.WindowSummary
 import com.deepak.umber.ingest.BackfillResult
 import com.deepak.umber.io.ImportReport
 import com.deepak.umber.ml.ModelStats
+import com.deepak.umber.remote.RegisterOutcome
+import com.deepak.umber.remote.SyncStatus
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flatMapLatest
@@ -113,6 +115,44 @@ class UmberViewModel(private val container: AppContainer) : ViewModel() {
     ) { messages, confirmed, merchants, rejects ->
         SettingsUiState(messages, confirmed, merchants, rejects)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), SettingsUiState())
+
+    // --------------------------------------------------------------------- sync
+    //
+    // container.remoteSync is null on the privacy flavour (see AppContainer), which is the single
+    // gate Settings uses to decide whether to show the cloud section at all.
+
+    val syncStatus: StateFlow<SyncStatus>? = container.remoteSync?.status
+
+    /** Set when [enableSync] fails — e.g. a rejected setup key. Cleared on the next attempt. */
+    private val _syncEnableError = MutableStateFlow<String?>(null)
+    val syncEnableError: StateFlow<String?> = _syncEnableError.asStateFlow()
+
+    fun enableSync(setupKey: String) {
+        val remote = container.remoteSync ?: return
+        viewModelScope.launch {
+            when (val outcome = remote.enable(setupKey)) {
+                RegisterOutcome.Success -> _syncEnableError.value = null
+                is RegisterOutcome.Failed -> _syncEnableError.value = outcome.detail
+            }
+        }
+    }
+
+    fun disableSync() {
+        container.remoteSync?.disable()
+    }
+
+    fun syncNow() {
+        val remote = container.remoteSync ?: return
+        viewModelScope.launch { remote.sync() }
+    }
+
+    /** Debug builds only — see Settings' endpoint override field. */
+    fun setSyncBaseUrlOverride(url: String?) {
+        container.remoteSync?.baseUrlOverride = url?.trim()?.takeIf { it.isNotBlank() }
+    }
+
+    /** Current override, if any — read once to seed the debug text field. */
+    fun syncBaseUrlOverride(): String? = container.remoteSync?.baseUrlOverride
 
     private val _task = MutableStateFlow<TaskState>(TaskState.Idle)
     val task: StateFlow<TaskState> = _task.asStateFlow()

@@ -14,6 +14,7 @@ import com.deepak.umber.io.LedgerCsv
 import com.deepak.umber.io.StatementImporter
 import com.deepak.umber.ml.Classifier
 import com.deepak.umber.ml.ModelStats
+import com.deepak.umber.remote.RemoteTxn
 import kotlinx.coroutines.flow.Flow
 import java.time.DayOfWeek
 import java.time.Instant
@@ -245,21 +246,24 @@ class UmberRepository(
         category: String,
         applyToPastFromSameMerchant: Boolean = true,
     ) {
+        val now = System.currentTimeMillis()
+
         db.txns().updateCategory(
             id = txn.id,
             category = category,
             source = CategorySource.USER,
             confidence = 1f,
             needsReview = false,
+            updatedAt = now,
         )
 
         val merchant = txn.merchantNorm
         if (applyToPastFromSameMerchant && !merchant.isNullOrBlank()) {
-            db.txns().relabelMerchant(merchant, category)
+            db.txns().relabelMerchant(merchant, category, now)
         }
 
         // Re-read so the classifier trains on the row as it now stands.
-        val updated = db.txns().byId(txn.id) ?: txn.copy(category = category)
+        val updated = db.txns().byId(txn.id) ?: txn.copy(category = category, updatedAt = now)
         classifier.learn(updated, category)
     }
 
@@ -280,4 +284,83 @@ class UmberRepository(
     suspend fun rebuildLedger(): Int = ingest.rebuildFromRawMessages()
 
     fun transactionCount(): Flow<Int> = db.txns().totalCount()
+
+    // ------------------------------------------------------------------- sync
+    //
+    // Only ever called from the `cloud` flavour's RemoteSync implementation. Kept here rather than
+    // behind raw TxnDao calls so the sync worker goes through the same invariant-centralising layer
+    // as everything else, per docs/ARCHITECTURE.md.
+
+    /** Local rows changed since their last successful push — SYNC.md's push payload. */
+    suspend fun pendingSync(limit: Int = 500): List<TxnEntity> = db.txns().pendingSync(limit)
+
+    /** Marks a row as pushed as of [updatedAt] (the value that was actually sent). */
+    suspend fun markSynced(clientId: String, updatedAt: Long) = db.txns().markSynced(clientId, updatedAt)
+
+    /**
+     * Applies a transaction pulled from the sync server — a dashboard edit or server-side LLM
+     * classification. Inserted if new (matched by `clientId`), otherwise merged into the existing
+     * row.
+     *
+     * The category fields go through [CategoryPriority] first: a user's own decision (`USER` or
+     * `MEMORY`) is never downgraded by a lower-priority remote source. Every other field always
+     * takes the server's version — the server is the merge authority for anything beyond category
+     * once two devices are in play, and in practice those fields don't change after extraction
+     * anyway.
+     */
+    suspend fun applyRemoteTxn(remote: RemoteTxn) {
+        val now = System.currentTimeMillis()
+        val existing = db.txns().byClientId(remote.clientId)
+
+        if (existing == null) {
+            db.txns().insert(
+                TxnEntity(
+                    // No local raw message backs a server-originated row. 0 is a safe sentinel: it's
+                    // never issued by RawMessageDao's autoGenerate primary key (which starts at 1),
+                    // and TxnDao.search's LEFT JOIN already treats an unmatched rawMessageId as "no
+                    // source" — the same case a rebuild's dropped file-import rows hit.
+                    rawMessageId = 0L,
+                    clientId = remote.clientId,
+                    amountPaise = remote.amountPaise,
+                    direction = remote.direction,
+                    channel = remote.channel,
+                    accountTail = remote.accountTail,
+                    merchantRaw = remote.merchantRaw,
+                    merchantNorm = remote.merchantNorm,
+                    vpaHandle = null,
+                    refNo = remote.refNo,
+                    balancePaise = remote.balancePaise,
+                    occurredAt = remote.occurredAt,
+                    category = remote.category,
+                    categorySource = remote.categorySource,
+                    confidence = 1f,
+                    needsReview = false,
+                    parserVersion = 0,
+                    createdAt = remote.updatedAt,
+                    updatedAt = remote.updatedAt,
+                    syncedAt = now,
+                ),
+            )
+            return
+        }
+
+        val keepLocalCategory = CategoryPriority.localWins(existing, remote)
+        db.txns().applySyncedFields(
+            id = existing.id,
+            amountPaise = remote.amountPaise,
+            direction = remote.direction,
+            channel = remote.channel,
+            merchantRaw = remote.merchantRaw,
+            merchantNorm = remote.merchantNorm,
+            accountTail = remote.accountTail,
+            refNo = remote.refNo,
+            balancePaise = remote.balancePaise,
+            occurredAt = remote.occurredAt,
+            category = if (keepLocalCategory) existing.category else remote.category,
+            categorySource = if (keepLocalCategory) existing.categorySource else remote.categorySource,
+            needsReview = if (keepLocalCategory) existing.needsReview else false,
+            updatedAt = if (keepLocalCategory) existing.updatedAt else remote.updatedAt,
+            syncedAt = now,
+        )
+    }
 }

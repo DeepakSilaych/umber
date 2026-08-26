@@ -141,6 +141,8 @@ private fun ReviewCard(txn: TxnEntity, onConfirm: (String) -> Unit) {
 private fun sourceLabel(source: CategorySource): String = when (source) {
     CategorySource.USER -> "you set this"
     CategorySource.MEMORY -> "from memory"
+    CategorySource.DASHBOARD -> "edited on the dashboard"
+    CategorySource.REMOTE -> "server's guess"
     CategorySource.MODEL -> "model's guess"
     CategorySource.SEED -> "built-in list"
     CategorySource.NONE -> "no guess"

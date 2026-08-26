@@ -1,0 +1,152 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@theme {
+  --color-umber-50: #faf5f0;
+  --color-umber-100: #f2e4d5;
+  --color-umber-200: #e4c7a8;
+  --color-umber-300: #d2a576;
+  --color-umber-400: #b6814e;
+  --color-umber-500: #8c5a34;
+  --color-umber-600: #764a2b;
+  --color-umber-700: #5e3a22;
+  --color-umber-800: #4e2f1b;
+  --color-umber-900: #3a2314;
+}
+
+/* shadcn semantic tokens mapped onto the umber brand scale + Tailwind's stock neutral/red/emerald/
+   amber palettes, instead of shadcn's default zinc theme. Dark overrides live in the
+   prefers-color-scheme media query (not a `.dark` class) so this matches the app's existing,
+   toggle-less OS-driven dark mode with zero JS. */
+:root {
+  color-scheme: light dark;
+  --radius: 0.625rem;
+
+  --background: var(--color-neutral-50);
+  --foreground: var(--color-neutral-900);
+  --card: white;
+  --card-foreground: var(--color-neutral-900);
+  --popover: white;
+  --popover-foreground: var(--color-neutral-900);
+
+  --primary: var(--color-umber-500);
+  --primary-foreground: white;
+  --secondary: var(--color-umber-100);
+  --secondary-foreground: var(--color-umber-800);
+  --muted: var(--color-neutral-100);
+  --muted-foreground: var(--color-neutral-500);
+  --accent: var(--color-umber-100);
+  --accent-foreground: var(--color-umber-800);
+  --destructive: var(--color-red-600);
+  --destructive-foreground: white;
+
+  --border: var(--color-neutral-200);
+  --input: var(--color-neutral-200);
+  --ring: var(--color-umber-500);
+
+  --chart-1: var(--color-umber-500);
+  --chart-2: var(--color-emerald-500);
+  --chart-3: var(--color-amber-500);
+  --chart-4: var(--color-red-500);
+  --chart-5: var(--color-umber-300);
+
+  --sidebar: white;
+  --sidebar-foreground: var(--color-neutral-900);
+  --sidebar-primary: var(--color-umber-500);
+  --sidebar-primary-foreground: white;
+  --sidebar-accent: var(--color-umber-100);
+  --sidebar-accent-foreground: var(--color-umber-800);
+  --sidebar-border: var(--color-neutral-200);
+  --sidebar-ring: var(--color-umber-500);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: var(--color-neutral-950);
+    --foreground: var(--color-neutral-100);
+    --card: var(--color-neutral-900);
+    --card-foreground: var(--color-neutral-100);
+    --popover: var(--color-neutral-900);
+    --popover-foreground: var(--color-neutral-100);
+
+    --primary: var(--color-umber-400);
+    --primary-foreground: var(--color-neutral-950);
+    --secondary: var(--color-umber-800);
+    --secondary-foreground: var(--color-umber-100);
+    --muted: var(--color-neutral-900);
+    --muted-foreground: var(--color-neutral-400);
+    --accent: var(--color-umber-800);
+    --accent-foreground: var(--color-umber-100);
+    --destructive: var(--color-red-500);
+    --destructive-foreground: white;
+
+    --border: var(--color-neutral-800);
+    --input: var(--color-neutral-800);
+    --ring: var(--color-umber-400);
+
+    --chart-1: var(--color-umber-400);
+    --chart-2: var(--color-emerald-400);
+    --chart-3: var(--color-amber-400);
+    --chart-4: var(--color-red-400);
+    --chart-5: var(--color-umber-300);
+
+    --sidebar: var(--color-neutral-900);
+    --sidebar-foreground: var(--color-neutral-100);
+    --sidebar-primary: var(--color-umber-400);
+    --sidebar-primary-foreground: var(--color-neutral-950);
+    --sidebar-accent: var(--color-umber-800);
+    --sidebar-accent-foreground: var(--color-umber-100);
+    --sidebar-border: var(--color-neutral-800);
+    --sidebar-ring: var(--color-umber-400);
+  }
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+html, body, #root { height: 100%; }
+
+body {
+  margin: 0;
+  @apply bg-background text-foreground antialiased;
+}
+
+/* Firefox: keep number inputs from showing spinners with odd widths in the amount fields */
+input[type='number'] { -moz-appearance: textfield; }

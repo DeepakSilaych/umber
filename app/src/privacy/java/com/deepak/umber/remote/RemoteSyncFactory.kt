@@ -1,6 +1,7 @@
 package com.deepak.umber.remote
 
 import android.content.Context
+import com.deepak.umber.data.repo.UmberRepository
 
 /**
  * The privacy flavour has no sync, and cannot have one.
@@ -10,5 +11,5 @@ import android.content.Context
  * nothing downstream can accidentally acquire a network path.
  */
 object RemoteSyncFactory {
-    fun create(context: Context): RemoteSync? = null
+    fun create(context: Context, repository: UmberRepository): RemoteSync? = null
 }

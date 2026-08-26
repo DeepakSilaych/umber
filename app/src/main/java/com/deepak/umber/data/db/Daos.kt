@@ -6,6 +6,7 @@ import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import com.deepak.umber.data.model.CategorySource
+import com.deepak.umber.data.model.Channel
 import com.deepak.umber.data.model.Direction
 import kotlinx.coroutines.flow.Flow
 
@@ -295,10 +296,70 @@ interface TxnDao {
     @Query("SELECT * FROM txn WHERE id = :id")
     suspend fun byId(id: Long): TxnEntity?
 
+    @Query("SELECT * FROM txn WHERE clientId = :clientId LIMIT 1")
+    suspend fun byClientId(clientId: String): TxnEntity?
+
+    /**
+     * Rows the sync worker hasn't successfully pushed yet.
+     *
+     * `syncedAt IS NULL` catches a row that has never been pushed; `updatedAt > syncedAt` catches
+     * one edited again after its last successful push. Either is cheap off the `updatedAt` index —
+     * no separate dirty-flag table needed.
+     */
+    @Query(
+        """
+        SELECT * FROM txn
+        WHERE syncedAt IS NULL OR updatedAt > syncedAt
+        ORDER BY updatedAt ASC
+        LIMIT :limit
+        """,
+    )
+    suspend fun pendingSync(limit: Int): List<TxnEntity>
+
+    /** Marks a row as pushed as of [syncedAt] — normally the `updatedAt` that was actually sent. */
+    @Query("UPDATE txn SET syncedAt = :syncedAt WHERE clientId = :clientId")
+    suspend fun markSynced(clientId: String, syncedAt: Long)
+
+    /**
+     * Merges a transaction pulled from the sync server into an existing local row, identified by
+     * [id] (the local row, found via `clientId` beforehand — `clientId` itself never changes).
+     *
+     * Callers resolve the category conflict (see `CategoryPriority`) before calling this — by the
+     * time it runs, `category`/`categorySource`/`needsReview` are already whichever side should win.
+     */
     @Query(
         """
         UPDATE txn
-        SET category = :category, categorySource = :source, confidence = :confidence, needsReview = :needsReview
+        SET amountPaise = :amountPaise, direction = :direction, channel = :channel,
+            merchantRaw = :merchantRaw, merchantNorm = :merchantNorm, accountTail = :accountTail,
+            refNo = :refNo, balancePaise = :balancePaise, occurredAt = :occurredAt,
+            category = :category, categorySource = :categorySource, needsReview = :needsReview,
+            updatedAt = :updatedAt, syncedAt = :syncedAt
+        WHERE id = :id
+        """,
+    )
+    suspend fun applySyncedFields(
+        id: Long,
+        amountPaise: Long,
+        direction: Direction,
+        channel: Channel,
+        merchantRaw: String?,
+        merchantNorm: String?,
+        accountTail: String?,
+        refNo: String?,
+        balancePaise: Long?,
+        occurredAt: Long,
+        category: String,
+        categorySource: CategorySource,
+        needsReview: Boolean,
+        updatedAt: Long,
+        syncedAt: Long,
+    )
+
+    @Query(
+        """
+        UPDATE txn
+        SET category = :category, categorySource = :source, confidence = :confidence, needsReview = :needsReview, updatedAt = :updatedAt
         WHERE id = :id
         """,
     )
@@ -308,6 +369,7 @@ interface TxnDao {
         source: CategorySource,
         confidence: Float,
         needsReview: Boolean,
+        updatedAt: Long,
     )
 
     /**
@@ -319,11 +381,11 @@ interface TxnDao {
     @Query(
         """
         UPDATE txn
-        SET category = :category, categorySource = 'MEMORY', confidence = 1.0, needsReview = 0
+        SET category = :category, categorySource = 'MEMORY', confidence = 1.0, needsReview = 0, updatedAt = :updatedAt
         WHERE merchantNorm = :merchantNorm AND categorySource != 'USER'
         """,
     )
-    suspend fun relabelMerchant(merchantNorm: String, category: String): Int
+    suspend fun relabelMerchant(merchantNorm: String, category: String, updatedAt: Long): Int
 
     /** Replay buffer for online learning — see Classifier.learn. */
     @Query("SELECT * FROM txn WHERE categorySource = 'USER' ORDER BY RANDOM() LIMIT :limit")

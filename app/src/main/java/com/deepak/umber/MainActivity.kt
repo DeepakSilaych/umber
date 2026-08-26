@@ -110,6 +110,10 @@ private fun AppScaffold(container: AppContainer, requestedTab: MutableState<Stri
     val settings by vm.settings.collectAsState()
     val task by vm.task.collectAsState()
     val modelStats by vm.modelStats.collectAsState()
+    // Null on the privacy flavour for the lifetime of the process — see AppContainer.remoteSync —
+    // so this conditional collectAsState call is stable across recompositions, not a runtime toggle.
+    val syncStatus = vm.syncStatus?.collectAsState()?.value
+    val syncEnableError by vm.syncEnableError.collectAsState()
 
     var tab by remember { mutableStateOf(Tab.HOME) }
 
@@ -280,6 +284,14 @@ private fun AppScaffold(container: AppContainer, requestedTab: MutableState<Stri
                         )
                     }
                 },
+                syncStatus = syncStatus,
+                syncEnableError = syncEnableError,
+                onEnableSync = { key -> vm.enableSync(key) },
+                onDisableSync = { vm.disableSync() },
+                onSyncNow = { vm.syncNow() },
+                isDebugBuild = BuildConfig.DEBUG,
+                syncBaseUrlOverride = remember { vm.syncBaseUrlOverride() },
+                onSyncBaseUrlOverrideChange = { url -> vm.setSyncBaseUrlOverride(url) },
                 modifier = Modifier.padding(padding),
             )
         }
