@@ -303,10 +303,16 @@ table is auto-categorized from that (as `DASHBOARD`, not flagged for review); ot
 `Other` / `NONE` / `needs_review: true`, same as the phone's own cold start. Responds with
 `{ total_rows, inserted, skipped_duplicate, needs_review, problem }`.
 
-### `POST /v1/classify` *(server-internal, not yet implemented)*
+### `POST /v1/classify`
 
-Batches merchant strings with no confident category and asks the LLM gateway. Not called by the
-phone or the dashboard — a background job. Design below; not built in the current server.
+Batches distinct `merchant_norm` strings that still have no confident category (`category = 'Other'`
+and `category_source IN ('NONE','SEED')`, and not already cached) and asks the LLM gateway to
+classify them into the fixed 15-category taxonomy — handling the mangled fragments bank statements
+produce ("bl inkit.pa" → Blinkit → Groceries, "a mazonpayg" → Amazon Pay → Shopping). Verdicts are
+cached permanently in `merchant_categories` (one call per string, ever) and applied to matching
+transactions as `category_source = 'REMOTE'`, subject to the conflict rules (never overwrites a
+`USER`/`MEMORY`/`DASHBOARD` edit). Dashboard/agent-gated. On a gateway failure the batch is skipped
+and reported in `failed_batches` rather than crashing. Design details below.
 
 ---
 

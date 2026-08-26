@@ -10,7 +10,18 @@ from fastapi.staticfiles import StaticFiles
 from app.config import get_settings
 from app.db.base import SessionLocal
 from app.db.models import Device
-from app.routers import accounts, auth_router, devices, holdings, insights, statements, stats, sync, transactions
+from app.routers import (
+    accounts,
+    auth_router,
+    classify,
+    devices,
+    holdings,
+    insights,
+    statements,
+    stats,
+    sync,
+    transactions,
+)
 
 settings = get_settings()
 
@@ -54,6 +65,7 @@ app.include_router(auth_router.router)
 app.include_router(accounts.router)
 app.include_router(holdings.router)
 app.include_router(insights.router)
+app.include_router(classify.router)
 
 
 @app.get("/healthz")

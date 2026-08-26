@@ -492,3 +492,13 @@ class InsightsResponse(BaseModel):
     cached: bool
     model: str | None
     generated_at: int
+
+
+# --- Classify ------------------------------------------------------------------
+
+
+class ClassifyResponse(BaseModel):
+    candidates_found: int
+    merchants_classified: int
+    transactions_updated: int
+    failed_batches: int

@@ -24,12 +24,13 @@ class Settings(BaseSettings):
 
     cors_origins: list[str] = ["http://localhost:5173"]
 
-    # LLM gateway for /v1/insights/generate — the same self-hosted gateway docs/SYNC.md's
-    # (not-yet-built) merchant-classification job is designed around. Key is server-only, never
-    # shipped to the phone APK.
+    # LLM gateway for /v1/insights/generate and /v1/classify — the self-hosted gateway docs/SYNC.md
+    # is designed around. Key is server-only, never shipped to the phone APK. Model must be one the
+    # gateway's client key actually has access to (verified: openai/gpt-oss-20b works; the older
+    # llama-3.x ids in the infra notes no longer route for this key).
     llm_gateway_url: str = "https://llm.deepaksilaych.me/v1"
     llm_gateway_key: str | None = None
-    llm_model: str = "llama-3.3-70b-versatile"
+    llm_model: str = "openai/gpt-oss-20b"
 
 
 @lru_cache
