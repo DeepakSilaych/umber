@@ -1,6 +1,7 @@
 import {
   BarChart3,
   CalendarDays,
+  LayoutGrid,
   Landmark,
   PlusCircle,
   Receipt,
@@ -38,6 +39,7 @@ export const navGroups: NavGroup[] = [
     label: 'Analytics',
     items: [
       { to: '/stats', label: 'Stats', icon: BarChart3 },
+      { to: '/breakdown', label: 'Breakdown', icon: LayoutGrid },
       { to: '/calendar', label: 'Calendar', icon: CalendarDays },
       { to: '/balances', label: 'Balances', icon: Landmark },
       { to: '/goals', label: 'Goals', icon: Target },

@@ -9,6 +9,7 @@ import ManualEntryPage from './pages/ManualEntryPage'
 import CalendarPage from './pages/CalendarPage'
 import BalancesPage from './pages/BalancesPage'
 import GoalsPage from './pages/GoalsPage'
+import BreakdownPage from './pages/BreakdownPage'
 
 function App() {
   return (
@@ -20,6 +21,7 @@ function App() {
             <Route path="/" element={<TransactionsPage />} />
             <Route path="/upload" element={<UploadPage />} />
             <Route path="/stats" element={<StatsPage />} />
+            <Route path="/breakdown" element={<BreakdownPage />} />
             <Route path="/calendar" element={<CalendarPage />} />
             <Route path="/balances" element={<BalancesPage />} />
             <Route path="/goals" element={<GoalsPage />} />

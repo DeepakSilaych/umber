@@ -3,9 +3,15 @@
 
 export type Direction = 'DEBIT' | 'CREDIT'
 
+/** Routine everyday spend vs a special/big-budget one-off. `null` = not yet typed. */
+export type SpendType = 'NORMAL' | 'SPECIAL'
+
+// The list/detail/patch transaction endpoints return TxnOutDetailed server-side, which is TxnOut
+// plus the dashboard-only `subcategory`/`spend_type` fields — so those are folded in here.
 export interface TxnOut {
   client_id: string
   device_id: string
+  account_id?: string | null
   occurred_at: number // epoch ms
   amount_paise: number
   direction: Direction
@@ -18,6 +24,8 @@ export interface TxnOut {
   category: string
   category_source: string
   needs_review: boolean
+  subcategory: string | null
+  spend_type: SpendType | null
   updated_at: number
   created_at: number
 }
@@ -31,6 +39,10 @@ export interface TransactionPatch {
   category?: string
   merchant_raw?: string
   needs_review?: boolean
+  /** Free-form detail under the category. Empty string clears it server-side. */
+  subcategory?: string
+  /** "NORMAL" | "SPECIAL". Empty string clears it server-side. */
+  spend_type?: string
 }
 
 export interface TransactionCreate {
@@ -139,6 +151,7 @@ export interface BudgetBucket {
   name: string
   monthly_target_paise: number
   category_keys: string[]
+  subcategory_keywords: string[]
   kind: BucketKind
   sort_order: number
 }
@@ -153,6 +166,7 @@ export interface BudgetBucketProgress {
   name: string
   kind: BucketKind
   category_keys: string[]
+  subcategory_keywords: string[]
   target_paise: number
   actual_paise: number
 }
@@ -171,6 +185,7 @@ export interface BudgetBucketInput {
   name: string
   monthly_target_paise: number
   category_keys: string[]
+  subcategory_keywords: string[]
   kind: BucketKind
   sort_order: number
 }
@@ -178,3 +193,41 @@ export interface BudgetBucketInput {
 export type BudgetBucketPatch = Partial<BudgetBucketInput>
 
 export type BudgetPeriod = 'this_month' | 'last_month' | 'this_year'
+
+// --- Distribution (category × normal/special) -------------------------------
+
+export interface DistributionRow {
+  category: string
+  normal_paise: number
+  special_paise: number
+}
+
+export interface DistributionResponse {
+  period: string
+  from_ms: number
+  to_ms: number
+  normal_total_paise: number
+  special_total_paise: number
+  untyped_total_paise: number // spend on rows with no spend_type assigned yet
+  rows: DistributionRow[] // desc by (normal + special)
+}
+
+// --- Sub-category breakdown -------------------------------------------------
+
+export interface SubcategoryBreakdownItem {
+  category: string
+  subcategory: string | null // null = not tagged yet ("Untagged")
+  amount_paise: number
+  transaction_count: number
+}
+
+export interface SubcategoryBreakdownResponse {
+  period: string
+  from_ms: number
+  to_ms: number
+  direction: string
+  items: SubcategoryBreakdownItem[] // desc by amount_paise
+}
+
+/** Period picker shared by the Breakdown analytics page. */
+export type BreakdownPeriod = 'this_month' | 'last_month' | 'this_year' | 'all'

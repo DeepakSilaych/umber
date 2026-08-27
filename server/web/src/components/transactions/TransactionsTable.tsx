@@ -2,6 +2,8 @@ import { useMemo } from 'react'
 import { flexRender, getCoreRowModel, useReactTable, type ColumnDef } from '@tanstack/react-table'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import CategorySelect from '@/components/CategorySelect'
+import SubcategoryCell from '@/components/transactions/SubcategoryCell'
+import SpendTypeCell from '@/components/transactions/SpendTypeCell'
 import { DirectionBadge, NeedsReviewBadge } from '@/components/Badges'
 import { formatDateTime, formatPaise } from '@/lib/format'
 import type { TxnOut } from '@/lib/types'
@@ -9,7 +11,11 @@ import type { TxnOut } from '@/lib/types'
 interface TransactionsTableProps {
   items: TxnOut[]
   loading: boolean
+  /** Existing sub-category values offered as inline datalist suggestions. */
+  subcategorySuggestions: string[]
   onCategoryChange: (txn: TxnOut, category: string) => void
+  onSubcategoryChange: (txn: TxnOut, subcategory: string) => void
+  onSpendTypeChange: (txn: TxnOut, spendType: string) => void
 }
 
 /**
@@ -17,7 +23,14 @@ interface TransactionsTableProps {
  * server-driven (the page component owns offset/limit and the Previous/Next controls), so this is
  * mounted with `manualPagination: true` and never paginates client-side.
  */
-export default function TransactionsTable({ items, loading, onCategoryChange }: TransactionsTableProps) {
+export default function TransactionsTable({
+  items,
+  loading,
+  subcategorySuggestions,
+  onCategoryChange,
+  onSubcategoryChange,
+  onSpendTypeChange,
+}: TransactionsTableProps) {
   const columns = useMemo<ColumnDef<TxnOut>[]>(
     () => [
       {
@@ -57,12 +70,28 @@ export default function TransactionsTable({ items, loading, onCategoryChange }: 
         ),
       },
       {
+        id: 'subcategory',
+        header: 'Sub-category',
+        cell: ({ row }) => (
+          <SubcategoryCell
+            txn={row.original}
+            suggestions={subcategorySuggestions}
+            onCommit={onSubcategoryChange}
+          />
+        ),
+      },
+      {
+        id: 'spend_type',
+        header: 'Type',
+        cell: ({ row }) => <SpendTypeCell txn={row.original} onCommit={onSpendTypeChange} />,
+      },
+      {
         id: 'status',
         header: 'Status',
         cell: ({ row }) => <NeedsReviewBadge needsReview={row.original.needs_review} />,
       },
     ],
-    [onCategoryChange],
+    [subcategorySuggestions, onCategoryChange, onSubcategoryChange, onSpendTypeChange],
   )
 
   const table = useReactTable({

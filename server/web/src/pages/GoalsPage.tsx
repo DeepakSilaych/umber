@@ -289,11 +289,20 @@ export default function GoalsPage() {
                           style={{ width: `${fillFraction(b) * 100}%` }}
                         />
                       </div>
-                      {b.category_keys.length > 0 && (
+                      {(b.category_keys.length > 0 || b.subcategory_keywords.length > 0) && (
                         <div className="mt-2 flex flex-wrap gap-1">
                           {b.category_keys.map((cat) => (
                             <Badge key={cat} variant="secondary" className="text-[10px] font-normal">
                               {cat}
+                            </Badge>
+                          ))}
+                          {b.subcategory_keywords.map((kw) => (
+                            <Badge
+                              key={`kw-${kw}`}
+                              variant="outline"
+                              className="text-[10px] font-normal text-muted-foreground"
+                            >
+                              #{kw}
                             </Badge>
                           ))}
                         </div>

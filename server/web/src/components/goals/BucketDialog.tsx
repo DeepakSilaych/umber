@@ -36,9 +36,25 @@ const formSchema = z.object({
     .refine((v) => rupeesToPaise(v) >= 0, { message: 'Enter a valid amount' }),
   kind: z.enum(['spend', 'savings']),
   categoryKeys: z.array(z.string()),
+  // Free-form, comma-separated in the input; split into an array on submit.
+  subcategoryKeywords: z.string(),
   sortOrder: z.string(),
 })
 type FormValues = z.infer<typeof formSchema>
+
+/** "streaming, netflix ,spotify" → ["streaming","netflix","spotify"] (trimmed, de-duped, no blanks). */
+function parseKeywords(raw: string): string[] {
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const part of raw.split(',')) {
+    const kw = part.trim()
+    if (kw && !seen.has(kw.toLowerCase())) {
+      seen.add(kw.toLowerCase())
+      out.push(kw)
+    }
+  }
+  return out
+}
 
 interface BucketDialogProps {
   open: boolean
@@ -68,6 +84,7 @@ export default function BucketDialog({
       target: '',
       kind: 'spend',
       categoryKeys: [],
+      subcategoryKeywords: '',
       sortOrder: String(nextSortOrder),
     },
   })
@@ -81,6 +98,7 @@ export default function BucketDialog({
       target: bucket ? String(bucket.monthly_target_paise / 100) : '',
       kind: bucket?.kind ?? 'spend',
       categoryKeys: bucket?.category_keys ?? [],
+      subcategoryKeywords: (bucket?.subcategory_keywords ?? []).join(', '),
       sortOrder: String(bucket?.sort_order ?? nextSortOrder),
     })
   }, [open, bucket, nextSortOrder, form])
@@ -91,6 +109,7 @@ export default function BucketDialog({
       name: values.name.trim(),
       monthly_target_paise: rupeesToPaise(values.target),
       category_keys: values.categoryKeys,
+      subcategory_keywords: parseKeywords(values.subcategoryKeywords),
       kind: values.kind,
       sort_order: Number.parseInt(values.sortOrder, 10) || 0,
     }
@@ -222,6 +241,28 @@ export default function BucketDialog({
                       )
                     })}
                   </div>
+                </FormItem>
+              )}
+            />
+
+            <FormField
+              control={form.control}
+              name="subcategoryKeywords"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>
+                    Sub-category keywords{' '}
+                    <span className="font-normal text-muted-foreground">
+                      (comma-separated; matches sub-categories too)
+                    </span>
+                  </FormLabel>
+                  <FormControl>
+                    <Input placeholder="e.g. streaming, netflix, spotify, mobile, internet" {...field} />
+                  </FormControl>
+                  <p className="text-xs text-muted-foreground">
+                    A transaction lands in this bucket if its category is checked above{' '}
+                    <span className="font-medium">or</span> its sub-category contains any keyword.
+                  </p>
                 </FormItem>
               )}
             />

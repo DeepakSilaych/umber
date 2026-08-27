@@ -8,8 +8,10 @@ import type {
   BudgetBucketPatch,
   BudgetOut,
   BudgetProgressResponse,
+  DistributionResponse,
   StatementImportResponse,
   StatsResponse,
+  SubcategoryBreakdownResponse,
   TimelineResponse,
   TransactionCreate,
   TransactionListResponse,
@@ -98,6 +100,8 @@ export interface TransactionFilters {
   category?: string
   needs_review?: boolean
   merchant?: string
+  subcategory?: string
+  spend_type?: string
   occurred_from?: number
   occurred_to?: number
   limit?: number
@@ -129,8 +133,46 @@ export function createTransaction(body: TransactionCreate): Promise<TxnOut> {
   })
 }
 
+/** Distinct existing sub-category strings, optionally scoped to one top-level category. */
+export function getSubcategories(category?: string): Promise<string[]> {
+  const qs = category ? `?category=${encodeURIComponent(category)}` : ''
+  return request(`/v1/transactions/subcategories${qs}`)
+}
+
 export function getStats(period: string): Promise<StatsResponse> {
   return request(`/v1/stats?period=${encodeURIComponent(period)}`)
+}
+
+// --- Distribution / sub-category breakdown ----------------------------------
+
+/** Window params for the analytics endpoints: either a named `period`, or an explicit
+ * `from_ms`/`to_ms` pair (used for "Last month" / "All", which have no period keyword). */
+export interface WindowParams {
+  period?: string
+  from_ms?: number
+  to_ms?: number
+  account_id?: string
+}
+
+function windowQuery(params: Record<string, string | number | undefined>): string {
+  const search = new URLSearchParams()
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined && value !== null && value !== '') {
+      search.set(key, String(value))
+    }
+  }
+  const qs = search.toString()
+  return qs ? `?${qs}` : ''
+}
+
+export function getDistribution(params: WindowParams = {}): Promise<DistributionResponse> {
+  return request(`/v1/stats/distribution${windowQuery({ ...params })}`)
+}
+
+export function getBySubcategory(
+  params: WindowParams & { category?: string } = {},
+): Promise<SubcategoryBreakdownResponse> {
+  return request(`/v1/stats/by-subcategory${windowQuery({ ...params })}`)
 }
 
 export function importStatement(file: File, accountId?: string): Promise<StatementImportResponse> {
