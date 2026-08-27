@@ -20,7 +20,7 @@ from app.config import Settings, get_settings
 from app.db.base import get_db
 from app.db.models import MerchantCategory, Transaction
 from app.llm_gateway import chat_completion
-from app.schemas import ClassifyResponse
+from app.schemas import ClassifyDetailResponse, ClassifyResponse
 
 router = APIRouter(prefix="/v1/classify", tags=["classify"])
 
@@ -133,5 +133,194 @@ def classify(
         candidates_found=len(candidates),
         merchants_classified=classified,
         transactions_updated=transactions_updated,
+        failed_batches=failed_batches,
+    )
+
+
+# --- Detailed classification: sub-category (axis 1) and normal/special (axis 2) ----------------
+
+SUBCATEGORY_PROMPT = """You assign a SHORT sub-category to each Indian bank/UPI merchant, refining
+its already-known top-level category. The merchant strings are often abbreviated or mangled by
+statement formatting (a stray space or line break mid-word).
+
+Input is a JSON array of {"merchant": "...", "category": "..."} objects. For each, return a concise
+1-3 word Title Case sub-category that sits UNDER the given category — never contradict it. Examples:
+- {"merchant":"ze pto.payu","category":"Groceries"} -> "Instant Delivery"
+- {"merchant":"H2 canteen","category":"Food & Dining"} -> "Canteen"
+- {"merchant":"pay zomato@","category":"Food & Dining"} -> "Food Delivery"
+- {"merchant":"ne tflix.bd","category":"Entertainment"} -> "Streaming"
+- {"merchant":"air tel.pay","category":"Bills & Utilities"} -> "Mobile & Internet"
+- {"merchant":"hostingerp","category":"Bills & Utilities"} -> "Hosting & Cloud"
+- {"merchant":"s bicardp.b","category":"Bills & Utilities"} -> "Credit Card Bill"
+- {"merchant":"a mazonpayg","category":"Shopping"} -> "Online Marketplace"
+
+Respond with ONLY a JSON object mapping each merchant string (verbatim, exactly as given) to its
+sub-category, no markdown fences, no extra prose:
+{"<merchant 1>": "<sub-category>", "<merchant 2>": "<sub-category>", ...}
+Every input merchant must appear as a key exactly once. Keep sub-categories consistent — reuse the
+same wording for the same kind of spend."""
+
+SPEND_TYPE_PROMPT = """You label each transaction as "NORMAL" or "SPECIAL".
+- NORMAL = routine, everyday spending: groceries, food, coffee, commute, small UPI payments,
+  regular bills and subscriptions — the ordinary flow of money.
+- SPECIAL = a special or big-budget expense: large one-off purchases, electronics, travel bookings,
+  lump-sum investments, big transfers, rent-sized or unusually large amounts for that category — the
+  things you'd plan for, not routine.
+Amount matters: the same merchant can be NORMAL at a small amount and SPECIAL at a large one. Judge
+each transaction on its merchant, category, and amount together.
+
+Input is a JSON array of {"id": "...", "merchant": "...", "category": "...", "amount_inr": 123.45}.
+Respond with ONLY a JSON object mapping each id to "NORMAL" or "SPECIAL", no fences, no extra prose:
+{"<id 1>": "NORMAL", "<id 2>": "SPECIAL", ...}
+Every input id must appear as a key exactly once."""
+
+
+def _parse_map(raw: str, keys: list[str], allowed: set[str] | None, default: str) -> dict[str, str]:
+    for candidate in (raw, _FENCE_RE.sub("", raw).strip()):
+        try:
+            parsed = json.loads(candidate)
+        except (json.JSONDecodeError, TypeError):
+            continue
+        if not isinstance(parsed, dict):
+            continue
+        out: dict[str, str] = {}
+        for k in keys:
+            v = parsed.get(k)
+            if isinstance(v, str) and v.strip() and (allowed is None or v.strip().upper() in allowed):
+                out[k] = v.strip().upper() if allowed else v.strip()[:60]
+            else:
+                out[k] = default
+        return out
+    return {k: default for k in keys}
+
+
+@router.post("/subcategory", response_model=ClassifyDetailResponse)
+def classify_subcategory(
+    db: Session = Depends(get_db),
+    _actor: Actor = Depends(require_dashboard_or_agent),
+    settings: Settings = Depends(get_settings),
+    limit: int = Query(default=200, ge=1, le=2000),
+) -> ClassifyDetailResponse:
+    """Assign a free-form sub-category to each merchant that has none cached yet, using the LLM,
+    and apply it to that merchant's transactions (never overwriting a USER hand-edit)."""
+    cached = select(MerchantCategory.merchant_norm).where(MerchantCategory.subcategory.isnot(None))
+    # distinct (merchant_norm, category) among rows that still lack a subcategory
+    rows = db.execute(
+        select(Transaction.merchant_norm, Transaction.category)
+        .where(
+            Transaction.merchant_norm.isnot(None),
+            Transaction.subcategory.is_(None),
+            Transaction.merchant_norm.notin_(cached),
+        )
+        .distinct()
+        .limit(limit)
+    ).all()
+    # keep the first category seen per merchant (a merchant is almost always one category)
+    merchant_cat: dict[str, str] = {}
+    for m, c in rows:
+        merchant_cat.setdefault(m, c)
+    merchants = list(merchant_cat.keys())
+
+    now_ms = int(time.time() * 1000)
+    assigned = 0
+    transactions_updated = 0
+    failed_batches = 0
+
+    for i in range(0, len(merchants), BATCH_SIZE):
+        batch = merchants[i : i + BATCH_SIZE]
+        payload = [{"merchant": m, "category": merchant_cat[m]} for m in batch]
+        try:
+            raw = chat_completion(settings, SUBCATEGORY_PROMPT, json.dumps(payload))
+            verdicts = _parse_map(raw, batch, allowed=None, default="")
+        except httpx.HTTPError:
+            failed_batches += 1
+            continue
+
+        for merchant_norm, subcat in verdicts.items():
+            if not subcat:
+                continue
+            mc = db.get(MerchantCategory, merchant_norm)
+            if mc is None:
+                mc = MerchantCategory(
+                    merchant_norm=merchant_norm,
+                    category=merchant_cat[merchant_norm],
+                    subcategory=subcat,
+                    model=settings.llm_model,
+                    decided_at=now_ms,
+                )
+                db.add(mc)
+            else:
+                mc.subcategory = subcat
+            assigned += 1
+
+            txns = db.execute(
+                select(Transaction).where(
+                    Transaction.merchant_norm == merchant_norm,
+                    Transaction.subcategory.is_(None),
+                    Transaction.category_source != "USER",
+                )
+            ).scalars().all()
+            for t in txns:
+                t.subcategory = subcat
+                transactions_updated += 1
+        db.commit()
+
+    return ClassifyDetailResponse(
+        candidates_found=len(merchants),
+        assigned=assigned,
+        transactions_updated=transactions_updated,
+        failed_batches=failed_batches,
+    )
+
+
+@router.post("/spend-type", response_model=ClassifyDetailResponse)
+def classify_spend_type(
+    db: Session = Depends(get_db),
+    _actor: Actor = Depends(require_dashboard_or_agent),
+    settings: Settings = Depends(get_settings),
+    limit: int = Query(default=200, ge=1, le=2000),
+) -> ClassifyDetailResponse:
+    """Assign NORMAL/SPECIAL to each DEBIT transaction that has none yet. Per-transaction (the same
+    merchant can be normal or special depending on amount), so not cached."""
+    txns = db.execute(
+        select(Transaction)
+        .where(Transaction.spend_type.is_(None), Transaction.direction == "DEBIT")
+        .limit(limit)
+    ).scalars().all()
+
+    now_ms = int(time.time() * 1000)
+    assigned = 0
+    failed_batches = 0
+    by_id = {t.client_id: t for t in txns}
+
+    for i in range(0, len(txns), BATCH_SIZE):
+        batch = txns[i : i + BATCH_SIZE]
+        payload = [
+            {
+                "id": t.client_id,
+                "merchant": t.merchant_raw or t.merchant_norm or "",
+                "category": t.category,
+                "amount_inr": round(t.amount_paise / 100, 2),
+            }
+            for t in batch
+        ]
+        ids = [t.client_id for t in batch]
+        try:
+            raw = chat_completion(settings, SPEND_TYPE_PROMPT, json.dumps(payload))
+            verdicts = _parse_map(raw, ids, allowed={"NORMAL", "SPECIAL"}, default="NORMAL")
+        except httpx.HTTPError:
+            failed_batches += 1
+            continue
+
+        for client_id, spend_type in verdicts.items():
+            by_id[client_id].spend_type = spend_type
+            by_id[client_id].updated_at = now_ms
+            assigned += 1
+        db.commit()
+
+    return ClassifyDetailResponse(
+        candidates_found=len(txns),
+        assigned=assigned,
+        transactions_updated=assigned,
         failed_batches=failed_batches,
     )

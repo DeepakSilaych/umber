@@ -64,12 +64,18 @@ def list_transactions(
     occurred_from: int | None = None,
     occurred_to: int | None = None,
     account_id: str | None = None,
+    subcategory: str | None = None,
+    spend_type: str | None = Query(default=None, pattern="^(NORMAL|SPECIAL)$"),
     limit: int = Query(default=100, ge=1, le=1000),
     offset: int = Query(default=0, ge=0),
 ) -> TransactionListResponse:
     stmt = select(Transaction)
     if category is not None:
         stmt = stmt.where(Transaction.category == category)
+    if subcategory is not None:
+        stmt = stmt.where(Transaction.subcategory == subcategory)
+    if spend_type is not None:
+        stmt = stmt.where(Transaction.spend_type == spend_type)
     if needs_review is not None:
         stmt = stmt.where(Transaction.needs_review == needs_review)
     if merchant is not None:
@@ -131,6 +137,9 @@ def patch_transaction(
     # treats None as "don't touch", but that leaves no way to unset subcategory without this.
     if "subcategory" in body.model_fields_set:
         row.subcategory = body.subcategory
+    # spend_type, like subcategory, distinguishes omitted from explicit-clear (empty string).
+    if "spend_type" in body.model_fields_set:
+        row.spend_type = body.spend_type
     if body.account_id is not None:
         if db.get(Account, body.account_id) is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Account not found")

@@ -83,6 +83,7 @@ class TxnOutDetailed(TxnOut):
     sees or sets."""
 
     subcategory: str | None
+    spend_type: str | None
 
 
 class RejectedTxn(BaseModel):
@@ -106,6 +107,7 @@ class SyncResponse(BaseModel):
 class TransactionPatch(BaseModel):
     category: str | None = None
     subcategory: str | None = None
+    spend_type: str | None = None
     merchant_raw: str | None = None
     needs_review: bool | None = None
     account_id: str | None = None
@@ -126,6 +128,18 @@ class TransactionPatch(BaseModel):
         if len(v) > 60:
             raise ValueError("subcategory must be at most 60 characters")
         return v or None  # "" clears it
+
+    @field_validator("spend_type")
+    @classmethod
+    def _spend_type(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        v = v.strip().upper()
+        if v == "":
+            return None  # "" clears it
+        if v not in ("NORMAL", "SPECIAL"):
+            raise ValueError("spend_type must be NORMAL or SPECIAL")
+        return v
 
 
 class TransactionCreate(BaseModel):
@@ -520,10 +534,15 @@ class BalanceSeriesResponse(BaseModel):
 # --- Budget --------------------------------------------------------------------
 
 
+def _norm_keywords(v: list[str]) -> list[str]:
+    return [k.strip().lower() for k in v if k.strip()]
+
+
 class BudgetBucketIn(BaseModel):
     name: str
     monthly_target_paise: int = Field(ge=0)
     category_keys: list[str] = Field(default_factory=list)
+    subcategory_keywords: list[str] = Field(default_factory=list)
     kind: str = "spend"
     sort_order: int = 0
 
@@ -542,11 +561,17 @@ class BudgetBucketIn(BaseModel):
                 raise ValueError(f"unknown category: {c}")
         return v
 
+    @field_validator("subcategory_keywords")
+    @classmethod
+    def _subcat_kw(cls, v: list[str]) -> list[str]:
+        return _norm_keywords(v)
+
 
 class BudgetBucketPatch(BaseModel):
     name: str | None = None
     monthly_target_paise: int | None = Field(default=None, ge=0)
     category_keys: list[str] | None = None
+    subcategory_keywords: list[str] | None = None
     kind: str | None = None
     sort_order: int | None = None
 
@@ -566,12 +591,18 @@ class BudgetBucketPatch(BaseModel):
                     raise ValueError(f"unknown category: {c}")
         return v
 
+    @field_validator("subcategory_keywords")
+    @classmethod
+    def _subcat_kw(cls, v: list[str] | None) -> list[str] | None:
+        return _norm_keywords(v) if v is not None else None
+
 
 class BudgetBucketOut(BaseModel):
     id: str
     name: str
     monthly_target_paise: int
     category_keys: list[str]
+    subcategory_keywords: list[str]
     kind: str
     sort_order: int
 
@@ -592,6 +623,7 @@ class BudgetBucketProgress(BaseModel):
     name: str
     kind: str
     category_keys: list[str]
+    subcategory_keywords: list[str]
     target_paise: int
     actual_paise: int
 
@@ -604,3 +636,32 @@ class BudgetProgressResponse(BaseModel):
     total_spent_paise: int
     unbudgeted_paise: int
     buckets: list[BudgetBucketProgress]
+
+
+# --- Distribution (category × normal/special) ----------------------------------
+
+
+class DistributionRow(BaseModel):
+    category: str
+    normal_paise: int
+    special_paise: int
+
+
+class DistributionResponse(BaseModel):
+    period: str
+    from_ms: int
+    to_ms: int
+    normal_total_paise: int
+    special_total_paise: int
+    untyped_total_paise: int  # spend on rows with no spend_type assigned yet
+    rows: list[DistributionRow]
+
+
+# --- Detailed classification ---------------------------------------------------
+
+
+class ClassifyDetailResponse(BaseModel):
+    candidates_found: int
+    assigned: int  # merchants (subcategory) or transactions (spend-type) updated
+    transactions_updated: int
+    failed_batches: int

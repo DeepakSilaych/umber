@@ -11,10 +11,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.auth import Actor, get_actor, require_dashboard_or_agent
-from app.categories import INCOME
 from app.db.base import get_db
 from app.db.models import BudgetBucket, BudgetConfig
-from app.routers.stats import _fetch_rows, _netting_for, _resolve_window
+from app.routers.stats import _fetch_rows, _resolve_window
 from app.schemas import (
     BudgetBucketIn,
     BudgetBucketOut,
@@ -79,6 +78,7 @@ def create_bucket(
         name=body.name,
         monthly_target_paise=body.monthly_target_paise,
         category_keys=body.category_keys,
+        subcategory_keywords=body.subcategory_keywords,
         kind=body.kind,
         sort_order=body.sort_order,
         created_at=now_ms,
@@ -106,6 +106,8 @@ def patch_bucket(
         row.monthly_target_paise = body.monthly_target_paise
     if body.category_keys is not None:
         row.category_keys = body.category_keys
+    if body.subcategory_keywords is not None:
+        row.subcategory_keywords = body.subcategory_keywords
     if body.kind is not None:
         row.kind = body.kind
     if body.sort_order is not None:
@@ -139,40 +141,52 @@ def budget_progress(
     window_from, window_to, label = _resolve_window(period, from_ms, to_ms, now_ms)
 
     rows = _fetch_rows(db, window_from, window_to, None)
-    # Net-of-reimbursement spend per category, same basis as /v1/stats.
-    net_by_category = _netting_for(rows).net_by_category
-    # Total outflow excludes Income (an inflow category), matching how the savings bucket is defined.
-    total_spent = sum(paise for cat, paise in net_by_category.items() if cat != INCOME)
-
     config = _get_config(db)
     buckets = _buckets(db)
+    spend_buckets = [b for b in buckets if b.kind == "spend"]
 
-    budgeted_categories: set[str] = set()
+    # Per-transaction assignment (not category aggregates) so a bucket can match by sub-category —
+    # e.g. a "Subscriptions" bucket keyworded on "streaming"/"mobile" pulls those out of Bills /
+    # Entertainment, keeping "subscriptions" and "bills" genuinely separate. Gross debit basis:
+    # a budget asks "how much went out per bucket", and per-transaction gross is what supports the
+    # sub-category split (reimbursement netting is category-level and can't be split by subcategory).
+    # First bucket in sort order wins, so each transaction counts toward at most one bucket.
+    def _match(txn) -> BudgetBucket | None:
+        sub = (txn.subcategory or "").lower()
+        for b in spend_buckets:
+            if txn.category in b.category_keys:
+                return b
+            if sub and any(kw in sub for kw in b.subcategory_keywords):
+                return b
+        return None
+
+    actual_by_bucket: dict[str, int] = {b.id: 0 for b in spend_buckets}
+    total_spent = 0
+    unbudgeted = 0
+    for r in rows:
+        if r.direction != "DEBIT":
+            continue
+        total_spent += r.amount_paise
+        b = _match(r)
+        if b is None:
+            unbudgeted += r.amount_paise
+        else:
+            actual_by_bucket[b.id] += r.amount_paise
+
     progress: list[BudgetBucketProgress] = []
     for b in buckets:
-        if b.kind == "savings":
-            actual = config.monthly_income_paise - total_spent
-        else:
-            actual = sum(net_by_category.get(cat, 0) for cat in b.category_keys)
-            budgeted_categories.update(b.category_keys)
+        actual = config.monthly_income_paise - total_spent if b.kind == "savings" else actual_by_bucket[b.id]
         progress.append(
             BudgetBucketProgress(
                 id=b.id,
                 name=b.name,
                 kind=b.kind,
                 category_keys=b.category_keys,
+                subcategory_keywords=b.subcategory_keywords,
                 target_paise=b.monthly_target_paise,
                 actual_paise=actual,
             )
         )
-
-    # Spend in categories assigned to no bucket (excluding Income) — surfaces leakage like
-    # Transfers/Other that isn't reflected in any budget line.
-    unbudgeted = sum(
-        paise
-        for cat, paise in net_by_category.items()
-        if cat != INCOME and cat not in budgeted_categories
-    )
 
     return BudgetProgressResponse(
         period=label,

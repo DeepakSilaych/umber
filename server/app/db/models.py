@@ -68,6 +68,9 @@ class Transaction(Base):
     # Dashboard/agent-only free-text tag layered on top of the frozen 15-item `category` taxonomy.
     # Never synced to or from the phone — see TxnOutDetailed vs TxnOut in schemas.py.
     subcategory: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Second categorization axis, dashboard-only (never synced): NORMAL = routine everyday spend,
+    # SPECIAL = a special / big-budget one-off. Per-transaction (amount-dependent), not per-merchant.
+    spend_type: Mapped[str | None] = mapped_column(Text, nullable=True)
     needs_review: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     # Statement row order, monotonic across imports. A whole import batch shares one `created_at`,
     # so without this the file order (needed to pick a day's *closing* balance for the balance
@@ -94,6 +97,8 @@ class Transaction(Base):
         Index("ix_txn_needs_review", "needs_review"),
         Index("ix_txn_account_occurred", "account_id", "occurred_at", "import_seq"),
         Index("ix_txn_subcategory", "subcategory", postgresql_where=text("subcategory IS NOT NULL")),
+        Index("ix_txn_spend_type", "spend_type", postgresql_where=text("spend_type IS NOT NULL")),
+        CheckConstraint("spend_type is null or spend_type in ('NORMAL','SPECIAL')", name="ck_txn_spend_type"),
     )
 
 
@@ -102,6 +107,9 @@ class MerchantCategory(Base):
 
     merchant_norm: Mapped[str] = mapped_column(Text, primary_key=True)
     category: Mapped[str] = mapped_column(Text, nullable=False)
+    # AI-assigned free-form detail beneath the top-level category, cached per merchant (one LLM call
+    # ever) so future statement imports of the same merchant inherit it — like `category` above.
+    subcategory: Mapped[str | None] = mapped_column(Text, nullable=True)
     confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
     model: Mapped[str | None] = mapped_column(Text, nullable=True)
     decided_at: Mapped[int] = mapped_column(BigInteger, nullable=False)
@@ -195,6 +203,11 @@ class BudgetBucket(Base):
     name: Mapped[str] = mapped_column(Text, nullable=False)
     monthly_target_paise: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
     category_keys: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    # Lowercased substrings matched against a transaction's free-form `subcategory`. Lets a bucket
+    # (e.g. "Subscriptions") capture spend by sub-category across top-level categories — the fix for
+    # "subscriptions and bills are different stuff": a txn matches this bucket if its category is in
+    # category_keys OR its subcategory contains any of these keywords.
+    subcategory_keywords: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
     kind: Mapped[str] = mapped_column(Text, nullable=False, default="spend")
     sort_order: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
     created_at: Mapped[int] = mapped_column(BigInteger, nullable=False)
