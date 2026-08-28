@@ -412,6 +412,9 @@ def by_subcategory(
     )
 
 
+DAILY_CONTEXT = "daily expense"
+
+
 @router.get("/stats/distribution", response_model=DistributionResponse)
 def distribution(
     db: Session = Depends(get_db),
@@ -421,30 +424,37 @@ def distribution(
     to_ms: int | None = None,
     account_id: str | None = None,
 ) -> DistributionResponse:
-    """Category × normal/special spend matrix. Gross DEBIT spend (spend_type only exists on debits),
-    split by spend_type; rows not yet typed are surfaced as `untyped`."""
+    """Category × context spend matrix. Gross DEBIT spend per (category, context); a NULL context
+    (the untagged default) is bucketed under "daily expense". Columns are the distinct contexts."""
     now_ms = int(time.time() * 1000)
     window_from, window_to, label = _resolve_window(period, from_ms, to_ms, now_ms)
     rows = _fetch_rows(db, window_from, window_to, account_id)
 
-    per_cat: dict[str, dict[str, int]] = defaultdict(lambda: {"NORMAL": 0, "SPECIAL": 0, None: 0})
+    per_cat: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    totals_by_context: dict[str, int] = defaultdict(int)
     for r in rows:
         if r.direction != "DEBIT":
             continue
-        per_cat[r.category][r.spend_type] += r.amount_paise
+        ctx = r.context or DAILY_CONTEXT
+        per_cat[r.category][ctx] += r.amount_paise
+        totals_by_context[ctx] += r.amount_paise
+
+    # Column order: daily expense first, then trips by total spend desc.
+    contexts = sorted(
+        totals_by_context, key=lambda c: (c != DAILY_CONTEXT, -totals_by_context[c])
+    )
 
     out_rows = [
-        DistributionRow(category=cat, normal_paise=v["NORMAL"], special_paise=v["SPECIAL"])
-        for cat, v in per_cat.items()
+        DistributionRow(category=cat, by_context=dict(ctxmap), total_paise=sum(ctxmap.values()))
+        for cat, ctxmap in per_cat.items()
     ]
-    out_rows.sort(key=lambda x: -(x.normal_paise + x.special_paise))
+    out_rows.sort(key=lambda x: -x.total_paise)
 
     return DistributionResponse(
         period=label,
         from_ms=window_from,
         to_ms=window_to,
-        normal_total_paise=sum(v["NORMAL"] for v in per_cat.values()),
-        special_total_paise=sum(v["SPECIAL"] for v in per_cat.values()),
-        untyped_total_paise=sum(v[None] for v in per_cat.values()),
+        contexts=contexts,
+        totals_by_context=dict(totals_by_context),
         rows=out_rows,
     )

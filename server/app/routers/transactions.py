@@ -12,6 +12,8 @@ from app.db.models import Account, Transaction
 from app.schemas import (
     BulkAssignAccountRequest,
     BulkAssignAccountResponse,
+    TagContextRequest,
+    TagContextResponse,
     TransactionCreate,
     TransactionListResponse,
     TransactionPatch,
@@ -20,9 +22,13 @@ from app.schemas import (
 
 router = APIRouter(prefix="/v1/transactions", tags=["transactions"])
 
+# NULL context = the ordinary default; surfaced under this label in views and matched by tagging's
+# only_untagged guard.
+DAILY_CONTEXT = "daily expense"
 
-# --- static paths first: /subcategories and /bulk-assign-account must be registered before
-# --- /{client_id}, or FastAPI would match those segments as a literal client_id.
+
+# --- static paths first: /subcategories, /contexts, /bulk-assign-account, /tag-context must be
+# --- registered before /{client_id}, or FastAPI would match those segments as a literal client_id.
 
 
 @router.get("/subcategories", response_model=list[str])
@@ -36,6 +42,38 @@ def list_subcategories(
         stmt = stmt.where(Transaction.category == category)
     rows = db.execute(stmt.order_by(Transaction.subcategory)).scalars().all()
     return list(rows)
+
+
+@router.get("/contexts", response_model=list[str])
+def list_contexts(db: Session = Depends(get_db), _actor: Actor = Depends(get_actor)) -> list[str]:
+    """Distinct existing context (trip/occasion) names, for the dashboard's autocomplete + trip list."""
+    rows = db.execute(
+        select(Transaction.context).where(Transaction.context.isnot(None)).distinct().order_by(Transaction.context)
+    ).scalars().all()
+    return list(rows)
+
+
+@router.post("/tag-context", response_model=TagContextResponse)
+def tag_context(
+    body: TagContextRequest, db: Session = Depends(get_db), _actor: Actor = Depends(require_dashboard_or_agent)
+) -> TagContextResponse:
+    """Tag every transaction in a date range (optionally scoped to certain categories) with a
+    context/trip name — the "tag by dates + type of purchase" mechanism. By default only touches
+    rows not already tagged to another trip, so tagging one trip doesn't stomp another."""
+    stmt = select(Transaction).where(
+        Transaction.occurred_at >= body.from_ms, Transaction.occurred_at <= body.to_ms
+    )
+    if body.categories:
+        stmt = stmt.where(Transaction.category.in_(body.categories))
+    if body.only_untagged:
+        stmt = stmt.where(Transaction.context.is_(None))
+    rows = db.execute(stmt).scalars().all()
+    now_ms = int(time.time() * 1000)
+    for r in rows:
+        r.context = body.context
+        r.updated_at = now_ms
+    db.commit()
+    return TagContextResponse(context=body.context, updated=len(rows))
 
 
 @router.post("/bulk-assign-account", response_model=BulkAssignAccountResponse)
@@ -65,7 +103,7 @@ def list_transactions(
     occurred_to: int | None = None,
     account_id: str | None = None,
     subcategory: str | None = None,
-    spend_type: str | None = Query(default=None, pattern="^(NORMAL|SPECIAL)$"),
+    context: str | None = None,
     limit: int = Query(default=100, ge=1, le=1000),
     offset: int = Query(default=0, ge=0),
 ) -> TransactionListResponse:
@@ -74,8 +112,9 @@ def list_transactions(
         stmt = stmt.where(Transaction.category == category)
     if subcategory is not None:
         stmt = stmt.where(Transaction.subcategory == subcategory)
-    if spend_type is not None:
-        stmt = stmt.where(Transaction.spend_type == spend_type)
+    if context is not None:
+        # The literal "daily expense" label means the untagged default (NULL).
+        stmt = stmt.where(Transaction.context.is_(None) if context == DAILY_CONTEXT else Transaction.context == context)
     if needs_review is not None:
         stmt = stmt.where(Transaction.needs_review == needs_review)
     if merchant is not None:
@@ -137,9 +176,10 @@ def patch_transaction(
     # treats None as "don't touch", but that leaves no way to unset subcategory without this.
     if "subcategory" in body.model_fields_set:
         row.subcategory = body.subcategory
-    # spend_type, like subcategory, distinguishes omitted from explicit-clear (empty string).
-    if "spend_type" in body.model_fields_set:
-        row.spend_type = body.spend_type
+    # context, like subcategory, distinguishes omitted from explicit-clear (empty string → NULL,
+    # i.e. back to the "daily expense" default).
+    if "context" in body.model_fields_set:
+        row.context = body.context
     if body.account_id is not None:
         if db.get(Account, body.account_id) is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Account not found")

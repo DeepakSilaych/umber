@@ -83,7 +83,7 @@ class TxnOutDetailed(TxnOut):
     sees or sets."""
 
     subcategory: str | None
-    spend_type: str | None
+    context: str | None
 
 
 class RejectedTxn(BaseModel):
@@ -107,7 +107,7 @@ class SyncResponse(BaseModel):
 class TransactionPatch(BaseModel):
     category: str | None = None
     subcategory: str | None = None
-    spend_type: str | None = None
+    context: str | None = None
     merchant_raw: str | None = None
     needs_review: bool | None = None
     account_id: str | None = None
@@ -129,17 +129,15 @@ class TransactionPatch(BaseModel):
             raise ValueError("subcategory must be at most 60 characters")
         return v or None  # "" clears it
 
-    @field_validator("spend_type")
+    @field_validator("context")
     @classmethod
-    def _spend_type(cls, v: str | None) -> str | None:
+    def _context(cls, v: str | None) -> str | None:
         if v is None:
             return None
-        v = v.strip().upper()
-        if v == "":
-            return None  # "" clears it
-        if v not in ("NORMAL", "SPECIAL"):
-            raise ValueError("spend_type must be NORMAL or SPECIAL")
-        return v
+        v = v.strip()
+        if len(v) > 60:
+            raise ValueError("context must be at most 60 characters")
+        return v or None  # "" clears it (→ the "daily expense" default)
 
 
 class TransactionCreate(BaseModel):
@@ -643,18 +641,40 @@ class BudgetProgressResponse(BaseModel):
 
 class DistributionRow(BaseModel):
     category: str
-    normal_paise: int
-    special_paise: int
+    by_context: dict[str, int]  # context name -> gross debit paise (NULL bucketed as DAILY_CONTEXT)
+    total_paise: int
 
 
 class DistributionResponse(BaseModel):
     period: str
     from_ms: int
     to_ms: int
-    normal_total_paise: int
-    special_total_paise: int
-    untyped_total_paise: int  # spend on rows with no spend_type assigned yet
+    contexts: list[str]  # column order: DAILY_CONTEXT first, then trips by total desc
+    totals_by_context: dict[str, int]
     rows: list[DistributionRow]
+
+
+class TagContextRequest(BaseModel):
+    context: str
+    from_ms: int
+    to_ms: int
+    categories: list[str] | None = None  # restrict to these top-level categories (e.g. travel-ish)
+    only_untagged: bool = True  # by default don't stomp a transaction already tagged to another trip
+
+    @field_validator("context")
+    @classmethod
+    def _context(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("context must not be empty")
+        if len(v) > 60:
+            raise ValueError("context must be at most 60 characters")
+        return v
+
+
+class TagContextResponse(BaseModel):
+    context: str
+    updated: int
 
 
 # --- Detailed classification ---------------------------------------------------

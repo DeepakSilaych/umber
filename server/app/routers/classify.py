@@ -153,6 +153,13 @@ Input is a JSON array of {"merchant": "...", "category": "..."} objects. For eac
 - {"merchant":"hostingerp","category":"Bills & Utilities"} -> "Hosting & Cloud"
 - {"merchant":"s bicardp.b","category":"Bills & Utilities"} -> "Credit Card Bill"
 - {"merchant":"a mazonpayg","category":"Shopping"} -> "Online Marketplace"
+- {"merchant":"uber","category":"Transport"} -> "Cab"
+- {"merchant":"ola money","category":"Transport"} -> "Cab"
+- {"merchant":"rapido","category":"Transport"} -> "Auto"
+- {"merchant":"c f.irctc@c","category":"Transport"} -> "Train"
+- {"merchant":"indigo","category":"Transport"} -> "Flight"
+- {"merchant":"hpcl petrol","category":"Transport"} -> "Fuel"
+For Transport specifically, use one of: Cab, Auto, Flight, Train, Bus, Metro, Fuel, Parking.
 
 Respond with ONLY a JSON object mapping each merchant string (verbatim, exactly as given) to its
 sub-category, no markdown fences, no extra prose:
@@ -160,19 +167,7 @@ sub-category, no markdown fences, no extra prose:
 Every input merchant must appear as a key exactly once. Keep sub-categories consistent — reuse the
 same wording for the same kind of spend."""
 
-SPEND_TYPE_PROMPT = """You label each transaction as "NORMAL" or "SPECIAL".
-- NORMAL = routine, everyday spending: groceries, food, coffee, commute, small UPI payments,
-  regular bills and subscriptions — the ordinary flow of money.
-- SPECIAL = a special or big-budget expense: large one-off purchases, electronics, travel bookings,
-  lump-sum investments, big transfers, rent-sized or unusually large amounts for that category — the
-  things you'd plan for, not routine.
-Amount matters: the same merchant can be NORMAL at a small amount and SPECIAL at a large one. Judge
-each transaction on its merchant, category, and amount together.
 
-Input is a JSON array of {"id": "...", "merchant": "...", "category": "...", "amount_inr": 123.45}.
-Respond with ONLY a JSON object mapping each id to "NORMAL" or "SPECIAL", no fences, no extra prose:
-{"<id 1>": "NORMAL", "<id 2>": "SPECIAL", ...}
-Every input id must appear as a key exactly once."""
 
 
 def _parse_map(raw: str, keys: list[str], allowed: set[str] | None, default: str) -> dict[str, str]:
@@ -269,58 +264,5 @@ def classify_subcategory(
         candidates_found=len(merchants),
         assigned=assigned,
         transactions_updated=transactions_updated,
-        failed_batches=failed_batches,
-    )
-
-
-@router.post("/spend-type", response_model=ClassifyDetailResponse)
-def classify_spend_type(
-    db: Session = Depends(get_db),
-    _actor: Actor = Depends(require_dashboard_or_agent),
-    settings: Settings = Depends(get_settings),
-    limit: int = Query(default=200, ge=1, le=2000),
-) -> ClassifyDetailResponse:
-    """Assign NORMAL/SPECIAL to each DEBIT transaction that has none yet. Per-transaction (the same
-    merchant can be normal or special depending on amount), so not cached."""
-    txns = db.execute(
-        select(Transaction)
-        .where(Transaction.spend_type.is_(None), Transaction.direction == "DEBIT")
-        .limit(limit)
-    ).scalars().all()
-
-    now_ms = int(time.time() * 1000)
-    assigned = 0
-    failed_batches = 0
-    by_id = {t.client_id: t for t in txns}
-
-    for i in range(0, len(txns), BATCH_SIZE):
-        batch = txns[i : i + BATCH_SIZE]
-        payload = [
-            {
-                "id": t.client_id,
-                "merchant": t.merchant_raw or t.merchant_norm or "",
-                "category": t.category,
-                "amount_inr": round(t.amount_paise / 100, 2),
-            }
-            for t in batch
-        ]
-        ids = [t.client_id for t in batch]
-        try:
-            raw = chat_completion(settings, SPEND_TYPE_PROMPT, json.dumps(payload))
-            verdicts = _parse_map(raw, ids, allowed={"NORMAL", "SPECIAL"}, default="NORMAL")
-        except httpx.HTTPError:
-            failed_batches += 1
-            continue
-
-        for client_id, spend_type in verdicts.items():
-            by_id[client_id].spend_type = spend_type
-            by_id[client_id].updated_at = now_ms
-            assigned += 1
-        db.commit()
-
-    return ClassifyDetailResponse(
-        candidates_found=len(txns),
-        assigned=assigned,
-        transactions_updated=assigned,
         failed_batches=failed_batches,
     )

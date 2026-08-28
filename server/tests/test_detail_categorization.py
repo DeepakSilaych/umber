@@ -33,62 +33,121 @@ def push(client, headers, device_id, **overrides):
     return body["client_id"]
 
 
-# --- spend_type patch ---------------------------------------------------------
+# --- context patch ------------------------------------------------------------
 
 
-def test_patch_spend_type_and_clear(client):
+def test_patch_context_and_clear(client):
     login(client)
     device = register_device(client)
     headers = {"Authorization": f"Bearer {device['token']}"}
     cid = push(client, headers, device["device_id"])
 
-    r = client.patch(f"/v1/transactions/{cid}", json={"spend_type": "special"})  # lowercase normalizes
+    r = client.patch(f"/v1/transactions/{cid}", json={"context": "mumbai_trip"})
     assert r.status_code == 200
-    assert r.json()["spend_type"] == "SPECIAL"
+    assert r.json()["context"] == "mumbai_trip"
 
-    r2 = client.patch(f"/v1/transactions/{cid}", json={"spend_type": ""})  # clears
-    assert r2.json()["spend_type"] is None
+    r2 = client.patch(f"/v1/transactions/{cid}", json={"context": ""})  # clears → daily-expense default
+    assert r2.json()["context"] is None
 
 
-def test_patch_spend_type_rejects_bad_value(client):
+def test_context_never_in_phone_sync_response(client):
     login(client)
     device = register_device(client)
     headers = {"Authorization": f"Bearer {device['token']}"}
     cid = push(client, headers, device["device_id"])
-    r = client.patch(f"/v1/transactions/{cid}", json={"spend_type": "HUGE"})
-    assert r.status_code == 422
-
-
-def test_spend_type_never_in_phone_sync_response(client):
-    login(client)
-    device = register_device(client)
-    headers = {"Authorization": f"Bearer {device['token']}"}
-    cid = push(client, headers, device["device_id"])
-    client.patch(f"/v1/transactions/{cid}", json={"spend_type": "NORMAL"})
+    client.patch(f"/v1/transactions/{cid}", json={"context": "goa_trip"})
     pull = client.post("/v1/sync", headers=headers, json={"device_id": device["device_id"], "since": 0, "transactions": []})
     for t in pull.json()["transactions"]:
-        assert "spend_type" not in t
+        assert "context" not in t
 
 
-def test_list_filters_by_spend_type_and_subcategory(client):
+def test_list_filters_by_context_and_subcategory(client):
     login(client)
     device = register_device(client)
     headers = {"Authorization": f"Bearer {device['token']}"}
     c1 = push(client, headers, device["device_id"], client_id=str(uuid.uuid4()))
     c2 = push(client, headers, device["device_id"], client_id=str(uuid.uuid4()))
-    client.patch(f"/v1/transactions/{c1}", json={"spend_type": "SPECIAL", "subcategory": "Gadget"})
-    client.patch(f"/v1/transactions/{c2}", json={"spend_type": "NORMAL"})
+    client.patch(f"/v1/transactions/{c1}", json={"context": "mumbai_trip", "subcategory": "Gadget"})
+    client.patch(f"/v1/transactions/{c2}", json={})  # stays untagged (daily expense)
 
-    special = client.get("/v1/transactions", params={"spend_type": "SPECIAL"}).json()
-    assert special["total"] == 1 and special["items"][0]["client_id"] == c1
+    trip = client.get("/v1/transactions", params={"context": "mumbai_trip"}).json()
+    assert trip["total"] == 1 and trip["items"][0]["client_id"] == c1
+    daily = client.get("/v1/transactions", params={"context": "daily expense"}).json()
+    assert daily["total"] == 1 and daily["items"][0]["client_id"] == c2
     sub = client.get("/v1/transactions", params={"subcategory": "Gadget"}).json()
     assert sub["total"] == 1
 
 
-# --- distribution -------------------------------------------------------------
+def test_contexts_autocomplete_lists_distinct(client):
+    login(client)
+    device = register_device(client)
+    headers = {"Authorization": f"Bearer {device['token']}"}
+    c1 = push(client, headers, device["device_id"], client_id=str(uuid.uuid4()))
+    client.patch(f"/v1/transactions/{c1}", json={"context": "mumbai_trip"})
+    assert client.get("/v1/transactions/contexts").json() == ["mumbai_trip"]
 
 
-def test_distribution_splits_by_spend_type(client):
+# --- tag-context (date-range trip tagging) ------------------------------------
+
+
+def test_tag_context_by_date_range_and_category_scope(client):
+    login(client)
+    device = register_device(client)
+    headers = {"Authorization": f"Bearer {device['token']}"}
+    now = 1_753_600_000_000
+    day = 24 * 60 * 60 * 1000
+    # Two travel-ish rows inside the window, one bill inside, one row outside the window.
+    in1 = push(client, headers, device["device_id"], client_id=str(uuid.uuid4()), category="Travel", occurred_at=now)
+    in2 = push(client, headers, device["device_id"], client_id=str(uuid.uuid4()), category="Food & Dining", occurred_at=now + 1000)
+    bill = push(client, headers, device["device_id"], client_id=str(uuid.uuid4()), category="Bills & Utilities", occurred_at=now + 2000)
+    outside = push(client, headers, device["device_id"], client_id=str(uuid.uuid4()), category="Travel", occurred_at=now + 5 * day)
+
+    # Scope to travel-ish categories so the routine bill in the window isn't swept in.
+    r = client.post("/v1/transactions/tag-context", json={
+        "context": "mumbai_trip", "from_ms": now - day, "to_ms": now + day,
+        "categories": ["Travel", "Food & Dining"],
+    })
+    assert r.status_code == 200
+    assert r.json()["updated"] == 2
+
+    def ctx(cid):
+        return client.get(f"/v1/transactions/{cid}", headers=headers).json()["context"]
+
+    assert ctx(in1) == "mumbai_trip"
+    assert ctx(in2) == "mumbai_trip"
+    assert ctx(bill) is None       # excluded by category scope
+    assert ctx(outside) is None    # excluded by date range
+
+
+def test_tag_context_only_untagged_guard(client):
+    login(client)
+    device = register_device(client)
+    headers = {"Authorization": f"Bearer {device['token']}"}
+    now = 1_753_600_000_000
+    day = 24 * 60 * 60 * 1000
+    cid = push(client, headers, device["device_id"], category="Travel", occurred_at=now)
+    client.patch(f"/v1/transactions/{cid}", json={"context": "goa_trip"})  # already tagged
+
+    # A later overlapping trip tag must NOT stomp the existing one (only_untagged default True).
+    r = client.post("/v1/transactions/tag-context", json={"context": "mumbai_trip", "from_ms": now - day, "to_ms": now + day})
+    assert r.json()["updated"] == 0
+    assert client.get(f"/v1/transactions/{cid}", headers=headers).json()["context"] == "goa_trip"
+
+    # With only_untagged False it overwrites.
+    r2 = client.post("/v1/transactions/tag-context", json={"context": "mumbai_trip", "from_ms": now - day, "to_ms": now + day, "only_untagged": False})
+    assert r2.json()["updated"] == 1
+    assert client.get(f"/v1/transactions/{cid}", headers=headers).json()["context"] == "mumbai_trip"
+
+
+def test_tag_context_requires_auth(client):
+    r = client.post("/v1/transactions/tag-context", json={"context": "x", "from_ms": 0, "to_ms": 1})
+    assert r.status_code == 401
+
+
+# --- distribution (category × context) ----------------------------------------
+
+
+def test_distribution_matrix_by_context(client):
     login(client)
     device = register_device(client)
     headers = {"Authorization": f"Bearer {device['token']}"}
@@ -96,17 +155,17 @@ def test_distribution_splits_by_spend_type(client):
     day = 24 * 60 * 60 * 1000
     a = push(client, headers, device["device_id"], client_id=str(uuid.uuid4()), amount_paise=5000, category="Food & Dining", occurred_at=now)
     b = push(client, headers, device["device_id"], client_id=str(uuid.uuid4()), amount_paise=90000, category="Food & Dining", occurred_at=now)
-    push(client, headers, device["device_id"], client_id=str(uuid.uuid4()), amount_paise=2000, category="Shopping", occurred_at=now)  # untyped
-    client.patch(f"/v1/transactions/{a}", json={"spend_type": "NORMAL"})
-    client.patch(f"/v1/transactions/{b}", json={"spend_type": "SPECIAL"})
+    push(client, headers, device["device_id"], client_id=str(uuid.uuid4()), amount_paise=2000, category="Shopping", occurred_at=now)  # stays daily
+    client.patch(f"/v1/transactions/{b}", json={"context": "mumbai_trip"})
 
     d = client.get("/v1/stats/distribution", params={"from_ms": now - day, "to_ms": now + day}).json()
+    assert set(d["contexts"]) == {"daily expense", "mumbai_trip"}
+    assert d["contexts"][0] == "daily expense"  # daily always first
     food = next(r for r in d["rows"] if r["category"] == "Food & Dining")
-    assert food["normal_paise"] == 5000
-    assert food["special_paise"] == 90000
-    assert d["normal_total_paise"] == 5000
-    assert d["special_total_paise"] == 90000
-    assert d["untyped_total_paise"] == 2000  # the Shopping row
+    assert food["by_context"]["daily expense"] == 5000  # row a, untagged
+    assert food["by_context"]["mumbai_trip"] == 90000   # row b, tagged
+    assert d["totals_by_context"]["mumbai_trip"] == 90000
+    assert d["totals_by_context"]["daily expense"] == 7000  # 5000 food + 2000 shopping
 
 
 # --- classify subcategory (mock gateway) --------------------------------------
@@ -134,31 +193,20 @@ def test_classify_subcategory_caches_and_applies(client, monkeypatch):
     assert client.post("/v1/classify/subcategory").json()["candidates_found"] == 0
 
 
-def test_classify_spend_type_assigns_and_survives_gateway_failure(client, monkeypatch):
+def test_classify_subcategory_survives_gateway_failure(client, monkeypatch):
     login(client)
     device = register_device(client)
     headers = {"Authorization": f"Bearer {device['token']}"}
-    push(client, headers, device["device_id"], amount_paise=500, category="Food & Dining")
-
-    def fake(settings, system_prompt, user_content, *, timeout=8.0):
-        ids = [x["id"] for x in json.loads(user_content)]
-        return json.dumps({i: "NORMAL" for i in ids})
-
-    monkeypatch.setattr(classify_module, "chat_completion", fake)
-    r = client.post("/v1/classify/spend-type").json()
-    assert r["assigned"] == 1
-
-    # Gateway down on a fresh row → no 500, reported as failed batch.
-    push(client, headers, device["device_id"], client_id=str(uuid.uuid4()), amount_paise=700, category="Shopping")
+    push(client, headers, device["device_id"], merchant_norm="uber", merchant_raw="UBER", category="Transport", category_source="REMOTE")
 
     def boom(settings, system_prompt, user_content, *, timeout=8.0):
         raise httpx.ConnectError("down")
 
     monkeypatch.setattr(classify_module, "chat_completion", boom)
-    r2 = client.post("/v1/classify/spend-type")
-    assert r2.status_code == 200
-    assert r2.json()["failed_batches"] == 1
-    assert r2.json()["assigned"] == 0
+    r = client.post("/v1/classify/subcategory")
+    assert r.status_code == 200  # no 500
+    assert r.json()["failed_batches"] == 1
+    assert r.json()["assigned"] == 0
 
 
 # --- budget subcategory-keyword matching --------------------------------------

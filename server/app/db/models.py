@@ -68,9 +68,11 @@ class Transaction(Base):
     # Dashboard/agent-only free-text tag layered on top of the frozen 15-item `category` taxonomy.
     # Never synced to or from the phone — see TxnOutDetailed vs TxnOut in schemas.py.
     subcategory: Mapped[str | None] = mapped_column(Text, nullable=True)
-    # Second categorization axis, dashboard-only (never synced): NORMAL = routine everyday spend,
-    # SPECIAL = a special / big-budget one-off. Per-transaction (amount-dependent), not per-merchant.
-    spend_type: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Second axis, dashboard-only (never synced): a free-text "context" grouping spend by trip or
+    # occasion across categories. NULL = the ordinary "daily expense" default; a named value like
+    # "mumbai_trip" groups a trip's flight + hotel + food + cabs together. Tagged mainly by date
+    # range (statements are date-only, which is fine — trips are date-bounded).
+    context: Mapped[str | None] = mapped_column(Text, nullable=True)
     needs_review: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     # Statement row order, monotonic across imports. A whole import batch shares one `created_at`,
     # so without this the file order (needed to pick a day's *closing* balance for the balance
@@ -97,8 +99,7 @@ class Transaction(Base):
         Index("ix_txn_needs_review", "needs_review"),
         Index("ix_txn_account_occurred", "account_id", "occurred_at", "import_seq"),
         Index("ix_txn_subcategory", "subcategory", postgresql_where=text("subcategory IS NOT NULL")),
-        Index("ix_txn_spend_type", "spend_type", postgresql_where=text("spend_type IS NOT NULL")),
-        CheckConstraint("spend_type is null or spend_type in ('NORMAL','SPECIAL')", name="ck_txn_spend_type"),
+        Index("ix_txn_context", "context", postgresql_where=text("context IS NOT NULL")),
     )
 
 
