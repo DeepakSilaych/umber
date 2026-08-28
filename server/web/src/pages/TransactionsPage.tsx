@@ -2,6 +2,7 @@ import { useCallback, useEffect, useId, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import CategorySelect from '@/components/CategorySelect'
 import DateRangeFilter from '@/components/DateRangeFilter'
 import ErrorAlert from '@/components/ErrorAlert'
@@ -9,13 +10,14 @@ import ToggleGroupFilter from '@/components/ToggleGroupFilter'
 import TransactionsTable from '@/components/transactions/TransactionsTable'
 import {
   ApiError,
+  getContexts,
   getSubcategories,
   listTransactions,
   patchTransaction,
   type TransactionFilters,
 } from '@/lib/api'
 import { dateInputToEndOfDayEpochMs, dateInputToEpochMs } from '@/lib/format'
-import type { SpendType, TransactionPatch, TxnOut } from '@/lib/types'
+import { DAILY_EXPENSE_CONTEXT, type TransactionPatch, type TxnOut } from '@/lib/types'
 
 const PAGE_SIZE = 50
 
@@ -24,11 +26,8 @@ const NEEDS_REVIEW_OPTIONS = [
   { value: 'needs_review', label: 'Needs review' },
 ]
 
-const SPEND_TYPE_OPTIONS = [
-  { value: 'all', label: 'All' },
-  { value: 'NORMAL', label: 'Normal' },
-  { value: 'SPECIAL', label: 'Special' },
-]
+// Radix Select forbids an empty item value, so "All contexts" rides this sentinel internally.
+const ALL_CONTEXTS = '__all__'
 
 export default function TransactionsPage() {
   const [items, setItems] = useState<TxnOut[]>([])
@@ -41,13 +40,14 @@ export default function TransactionsPage() {
   const [category, setCategory] = useState('')
   const [merchant, setMerchant] = useState('')
   const [merchantInput, setMerchantInput] = useState('')
-  const [spendType, setSpendType] = useState('') // '' | 'NORMAL' | 'SPECIAL'
+  const [context, setContext] = useState('') // '' = all; 'daily expense' = default bucket; else a trip
   const [subcategory, setSubcategory] = useState('')
   const [subcategoryInput, setSubcategoryInput] = useState('')
   const [occurredFrom, setOccurredFrom] = useState('')
   const [occurredTo, setOccurredTo] = useState('')
 
   const [subcategorySuggestions, setSubcategorySuggestions] = useState<string[]>([])
+  const [contextSuggestions, setContextSuggestions] = useState<string[]>([])
   const subcatFilterListId = useId()
 
   // Existing sub-category values power both the inline-edit datalist and the filter box.
@@ -59,9 +59,19 @@ export default function TransactionsPage() {
       })
   }, [])
 
+  // Existing context (trip) names power the inline-edit datalist and the context filter Select.
+  const loadContexts = useCallback(() => {
+    getContexts()
+      .then(setContextSuggestions)
+      .catch(() => {
+        /* non-fatal: suggestions are a convenience, not required for editing */
+      })
+  }, [])
+
   useEffect(() => {
     loadSubcategories()
-  }, [loadSubcategories])
+    loadContexts()
+  }, [loadSubcategories, loadContexts])
 
   // Debounce the free-text boxes so we don't fire a request per keystroke.
   useEffect(() => {
@@ -76,7 +86,7 @@ export default function TransactionsPage() {
   // Any filter change resets pagination back to the first page.
   useEffect(() => {
     setOffset(0)
-  }, [needsReviewOnly, category, merchant, spendType, subcategory, occurredFrom, occurredTo])
+  }, [needsReviewOnly, category, merchant, context, subcategory, occurredFrom, occurredTo])
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -88,7 +98,7 @@ export default function TransactionsPage() {
     if (needsReviewOnly) filters.needs_review = true
     if (category) filters.category = category
     if (merchant) filters.merchant = merchant
-    if (spendType) filters.spend_type = spendType
+    if (context) filters.context = context
     if (subcategory) filters.subcategory = subcategory
     if (occurredFrom) filters.occurred_from = dateInputToEpochMs(occurredFrom)
     if (occurredTo) filters.occurred_to = dateInputToEndOfDayEpochMs(occurredTo)
@@ -103,7 +113,7 @@ export default function TransactionsPage() {
     } finally {
       setLoading(false)
     }
-  }, [needsReviewOnly, category, merchant, spendType, subcategory, occurredFrom, occurredTo, offset])
+  }, [needsReviewOnly, category, merchant, context, subcategory, occurredFrom, occurredTo, offset])
 
   useEffect(() => {
     load()
@@ -149,19 +159,23 @@ export default function TransactionsPage() {
     }
   }
 
-  function handleSpendTypeChange(txn: TxnOut, newSpendType: string) {
-    void patchAndReplace(
+  async function handleContextChange(txn: TxnOut, newContext: string) {
+    const ok = await patchAndReplace(
       txn,
-      { spend_type: newSpendType },
-      { spend_type: (newSpendType || null) as SpendType | null },
-      'Failed to update type.',
+      { context: newContext },
+      { context: newContext || null },
+      'Failed to update context.',
     )
+    // A newly-typed trip name should show up in the suggestion list (and the filter Select).
+    if (ok && newContext && !contextSuggestions.includes(newContext)) {
+      loadContexts()
+    }
   }
 
   const from = total === 0 ? 0 : offset + 1
   const to = Math.min(offset + PAGE_SIZE, total)
   const hasActiveFilters =
-    category || merchantInput || subcategoryInput || spendType || occurredFrom || occurredTo || needsReviewOnly
+    category || merchantInput || subcategoryInput || context || occurredFrom || occurredTo || needsReviewOnly
 
   return (
     <div>
@@ -177,12 +191,26 @@ export default function TransactionsPage() {
         />
 
         <div>
-          <Label className="mb-1 text-xs font-medium text-muted-foreground">Type</Label>
-          <ToggleGroupFilter
-            options={SPEND_TYPE_OPTIONS}
-            value={spendType || 'all'}
-            onChange={(v) => setSpendType(v === 'all' ? '' : v)}
-          />
+          <Label htmlFor="filter-context" className="mb-1 text-xs font-medium text-muted-foreground">
+            Context
+          </Label>
+          <Select
+            value={context === '' ? ALL_CONTEXTS : context}
+            onValueChange={(v) => setContext(v === ALL_CONTEXTS ? '' : v)}
+          >
+            <SelectTrigger id="filter-context" className="h-9 w-44">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={ALL_CONTEXTS}>All</SelectItem>
+              <SelectItem value={DAILY_EXPENSE_CONTEXT}>daily expense</SelectItem>
+              {contextSuggestions.map((c) => (
+                <SelectItem key={c} value={c}>
+                  {c}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
 
         <div>
@@ -240,7 +268,7 @@ export default function TransactionsPage() {
               setCategory('')
               setMerchantInput('')
               setSubcategoryInput('')
-              setSpendType('')
+              setContext('')
               setOccurredFrom('')
               setOccurredTo('')
               setNeedsReviewOnly(false)
@@ -258,9 +286,10 @@ export default function TransactionsPage() {
         items={items}
         loading={loading}
         subcategorySuggestions={subcategorySuggestions}
+        contextSuggestions={contextSuggestions}
         onCategoryChange={handleCategoryChange}
         onSubcategoryChange={handleSubcategoryChange}
-        onSpendTypeChange={handleSpendTypeChange}
+        onContextChange={handleContextChange}
       />
 
       <div className="mt-3 flex items-center justify-between text-sm text-muted-foreground">

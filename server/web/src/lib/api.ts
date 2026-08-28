@@ -12,6 +12,8 @@ import type {
   StatementImportResponse,
   StatsResponse,
   SubcategoryBreakdownResponse,
+  TagContextRequest,
+  TagContextResponse,
   TimelineResponse,
   TransactionCreate,
   TransactionListResponse,
@@ -101,7 +103,8 @@ export interface TransactionFilters {
   needs_review?: boolean
   merchant?: string
   subcategory?: string
-  spend_type?: string
+  /** Free-text trip/occasion. Pass "daily expense" to filter the default (NULL) bucket. */
+  context?: string
   occurred_from?: number
   occurred_to?: number
   limit?: number
@@ -137,6 +140,19 @@ export function createTransaction(body: TransactionCreate): Promise<TxnOut> {
 export function getSubcategories(category?: string): Promise<string[]> {
   const qs = category ? `?category=${encodeURIComponent(category)}` : ''
   return request(`/v1/transactions/subcategories${qs}`)
+}
+
+/** Distinct existing context (trip/occasion) names — for autocomplete and the trip list. */
+export function getContexts(): Promise<string[]> {
+  return request('/v1/transactions/contexts')
+}
+
+/** Tags all transactions in a date range (optionally scoped to categories) with a context. */
+export function tagContext(body: TagContextRequest): Promise<TagContextResponse> {
+  return request('/v1/transactions/tag-context', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  })
 }
 
 export function getStats(period: string): Promise<StatsResponse> {

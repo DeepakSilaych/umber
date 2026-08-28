@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { endOfMonth, startOfMonth, subMonths } from 'date-fns'
 import { Card, CardContent } from '@/components/ui/card'
 import {
@@ -12,13 +12,15 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import ErrorAlert from '@/components/ErrorAlert'
 import ToggleGroupFilter from '@/components/ToggleGroupFilter'
-import { ApiError, getBySubcategory, getDistribution, type WindowParams } from '@/lib/api'
+import TripsPanel from '@/components/trips/TripsPanel'
+import { ApiError, getBySubcategory, getContexts, getDistribution, type WindowParams } from '@/lib/api'
 import { formatPaise } from '@/lib/format'
 import { cn } from '@/lib/utils'
-import type {
-  BreakdownPeriod,
-  DistributionResponse,
-  SubcategoryBreakdownResponse,
+import {
+  DAILY_EXPENSE_CONTEXT,
+  type BreakdownPeriod,
+  type DistributionResponse,
+  type SubcategoryBreakdownResponse,
 } from '@/lib/types'
 
 const PERIODS: { value: BreakdownPeriod; label: string }[] = [
@@ -44,23 +46,41 @@ function windowParamsFor(period: BreakdownPeriod): WindowParams {
 // Sentinel for "All categories" in the sub-category Select (Radix forbids an empty item value).
 const ALL_CATEGORIES = '__all__'
 
+// Column colors per context. Daily-expense (always first) gets emerald; trips cycle the rest.
+const CONTEXT_PALETTE = [
+  'var(--color-chart-2)', // daily expense — emerald
+  'var(--color-chart-3)', // amber
+  'var(--color-chart-1)', // umber
+  'var(--color-chart-4)', // red
+  'var(--color-chart-5)', // umber-300
+]
+function contextColor(index: number): string {
+  return CONTEXT_PALETTE[index % CONTEXT_PALETTE.length]
+}
+
 export default function BreakdownPage() {
   const [period, setPeriod] = useState<BreakdownPeriod>('this_month')
   const [distribution, setDistribution] = useState<DistributionResponse | null>(null)
+  const [trips, setTrips] = useState<string[]>([])
   const [bySubcategory, setBySubcategory] = useState<SubcategoryBreakdownResponse | null>(null)
   const [selectedCategory, setSelectedCategory] = useState('') // '' = all categories
   const [loading, setLoading] = useState(true)
   const [subLoading, setSubLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  // Distribution matrix depends only on the period.
+  // Distribution matrix + the trip list. Bumped to force a refresh after a trip is tagged.
+  const [refreshKey, setRefreshKey] = useState(0)
+  const refresh = useCallback(() => setRefreshKey((k) => k + 1), [])
+
   useEffect(() => {
     let cancelled = false
     setLoading(true)
     setError(null)
-    getDistribution(windowParamsFor(period))
-      .then((res) => {
-        if (!cancelled) setDistribution(res)
+    Promise.all([getDistribution(windowParamsFor(period)), getContexts()])
+      .then(([dist, ctxs]) => {
+        if (cancelled) return
+        setDistribution(dist)
+        setTrips(ctxs)
       })
       .catch((err) => {
         if (cancelled) return
@@ -73,7 +93,7 @@ export default function BreakdownPage() {
     return () => {
       cancelled = true
     }
-  }, [period])
+  }, [period, refreshKey])
 
   // Sub-category breakdown depends on period + the selected category filter.
   useEffect(() => {
@@ -99,22 +119,19 @@ export default function BreakdownPage() {
     }
   }, [period, selectedCategory])
 
-  const typedTotal =
-    (distribution?.normal_total_paise ?? 0) + (distribution?.special_total_paise ?? 0)
-  const grandTotal = typedTotal + (distribution?.untyped_total_paise ?? 0)
+  const contexts = distribution?.contexts ?? []
+  const totalsByContext = distribution?.totals_by_context ?? {}
+  const grandTotal = useMemo(
+    () => Object.values(totalsByContext).reduce((sum, v) => sum + v, 0),
+    [totalsByContext],
+  )
 
   const rows = distribution?.rows ?? []
-  // Longest typed bar in the matrix, to scale each row's bar width by its share of the biggest row.
-  const maxRowTotal = useMemo(
-    () => Math.max(1, ...rows.map((r) => r.normal_paise + r.special_paise)),
-    [rows],
-  )
+  // Longest row in the matrix, to scale each row's split bar by its share of the biggest row.
+  const maxRowTotal = useMemo(() => Math.max(1, ...rows.map((r) => r.total_paise)), [rows])
 
   const subItems = bySubcategory?.items ?? []
-  const maxSubAmount = useMemo(
-    () => Math.max(1, ...subItems.map((i) => i.amount_paise)),
-    [subItems],
-  )
+  const maxSubAmount = useMemo(() => Math.max(1, ...subItems.map((i) => i.amount_paise)), [subItems])
 
   function toggleCategory(category: string) {
     setSelectedCategory((cur) => (cur === category ? '' : category))
@@ -133,6 +150,8 @@ export default function BreakdownPage() {
 
       {error && <ErrorAlert message={error} className="mb-4" />}
 
+      <TripsPanel trips={trips} totalsByContext={totalsByContext} onChanged={refresh} />
+
       {loading && !distribution ? (
         <div className="space-y-4">
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
@@ -144,32 +163,25 @@ export default function BreakdownPage() {
         </div>
       ) : distribution ? (
         <>
-          <div className="mb-6 grid grid-cols-1 gap-3 sm:grid-cols-3">
-            <StatCard
-              label="Normal"
-              value={distribution.normal_total_paise}
-              tone="normal"
-              share={grandTotal > 0 ? distribution.normal_total_paise / grandTotal : 0}
-            />
-            <StatCard
-              label="Special"
-              value={distribution.special_total_paise}
-              tone="special"
-              share={grandTotal > 0 ? distribution.special_total_paise / grandTotal : 0}
-            />
-            <StatCard
-              label="Untyped"
-              value={distribution.untyped_total_paise}
-              tone="untyped"
-              share={grandTotal > 0 ? distribution.untyped_total_paise / grandTotal : 0}
-              hint="Spend not yet marked Normal or Special"
-            />
-          </div>
+          {contexts.length > 0 && (
+            <div className="mb-6 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              {contexts.map((ctx, i) => (
+                <ContextStatCard
+                  key={ctx}
+                  label={ctx}
+                  value={totalsByContext[ctx] ?? 0}
+                  color={contextColor(i)}
+                  share={grandTotal > 0 ? (totalsByContext[ctx] ?? 0) / grandTotal : 0}
+                  isDefault={ctx === DAILY_EXPENSE_CONTEXT}
+                />
+              ))}
+            </div>
+          )}
 
           <Card className="mb-6">
             <CardContent>
               <div className="mb-3 flex items-center justify-between">
-                <h2 className="text-sm font-medium">Category × Normal / Special</h2>
+                <h2 className="text-sm font-medium">Category × Context</h2>
                 <span className="text-xs text-muted-foreground">Click a row to filter sub-categories</span>
               </div>
               {rows.length === 0 ? (
@@ -181,41 +193,62 @@ export default function BreakdownPage() {
                   <Table>
                     <TableHeader>
                       <TableRow>
-                        <TableHead>Category</TableHead>
-                        <TableHead className="text-right">Normal</TableHead>
-                        <TableHead className="text-right">Special</TableHead>
+                        <TableHead className="sticky left-0 bg-card">Category</TableHead>
+                        {contexts.map((ctx, i) => (
+                          <TableHead key={ctx} className="text-right whitespace-nowrap">
+                            <span className="inline-flex items-center gap-1.5">
+                              <span
+                                className="inline-block size-2 shrink-0 rounded-full"
+                                style={{ backgroundColor: contextColor(i) }}
+                              />
+                              {ctx}
+                            </span>
+                          </TableHead>
+                        ))}
                         <TableHead className="text-right">Total</TableHead>
                         <TableHead className="w-[160px]">Split</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {rows.map((r) => {
-                        const rowTotal = r.normal_paise + r.special_paise
                         const active = selectedCategory === r.category
                         return (
                           <TableRow
                             key={r.category}
                             onClick={() => toggleCategory(r.category)}
-                            className={cn(
-                              'cursor-pointer',
-                              active && 'bg-muted/60 hover:bg-muted/60',
-                            )}
+                            className={cn('cursor-pointer', active && 'bg-muted/60 hover:bg-muted/60')}
                           >
-                            <TableCell className="font-medium">{r.category}</TableCell>
-                            <TableCell className="text-right tabular-nums">
-                              {formatPaise(r.normal_paise)}
+                            <TableCell
+                              className={cn(
+                                'sticky left-0 bg-card font-medium',
+                                active && 'bg-muted/60',
+                              )}
+                            >
+                              {r.category}
                             </TableCell>
-                            <TableCell className="text-right tabular-nums text-amber-600 dark:text-amber-400">
-                              {formatPaise(r.special_paise)}
-                            </TableCell>
+                            {contexts.map((ctx) => {
+                              const val = r.by_context[ctx] ?? 0
+                              return (
+                                <TableCell
+                                  key={ctx}
+                                  className={cn(
+                                    'text-right tabular-nums',
+                                    val === 0 && 'text-muted-foreground/40',
+                                  )}
+                                >
+                                  {val === 0 ? '—' : formatPaise(val)}
+                                </TableCell>
+                              )
+                            })}
                             <TableCell className="text-right font-medium tabular-nums">
-                              {formatPaise(rowTotal)}
+                              {formatPaise(r.total_paise)}
                             </TableCell>
                             <TableCell>
-                              <SplitBar
-                                normal={r.normal_paise}
-                                special={r.special_paise}
-                                widthFraction={rowTotal / maxRowTotal}
+                              <ContextSplitBar
+                                contexts={contexts}
+                                byContext={r.by_context}
+                                total={r.total_paise}
+                                widthFraction={r.total_paise / maxRowTotal}
                               />
                             </TableCell>
                           </TableRow>
@@ -299,76 +332,82 @@ export default function BreakdownPage() {
   )
 }
 
-function StatCard({
+function ContextStatCard({
   label,
   value,
-  tone,
+  color,
   share,
-  hint,
+  isDefault,
 }: {
   label: string
   value: number
-  tone: 'normal' | 'special' | 'untyped'
+  color: string
   share: number
-  hint?: string
+  isDefault: boolean
 }) {
-  const valueClasses =
-    tone === 'special'
-      ? 'text-amber-600 dark:text-amber-400'
-      : tone === 'untyped'
-        ? 'text-muted-foreground'
-        : 'text-foreground'
-  const barClass =
-    tone === 'special' ? 'bg-amber-500' : tone === 'untyped' ? 'bg-muted-foreground/40' : 'bg-emerald-500'
-
   return (
     <Card className="gap-1 py-4">
       <CardContent className="px-4">
-        <div className="flex items-center justify-between">
-          <div className="text-xs text-muted-foreground">{label}</div>
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex min-w-0 items-center gap-1.5">
+            <span className="inline-block size-2 shrink-0 rounded-full" style={{ backgroundColor: color }} />
+            <span className="truncate text-xs text-muted-foreground">{label}</span>
+          </div>
           <div className="text-xs tabular-nums text-muted-foreground">{Math.round(share * 100)}%</div>
         </div>
-        <div className={cn('mt-1 text-lg font-semibold tabular-nums', valueClasses)}>
-          {formatPaise(value)}
-        </div>
+        <div className="mt-1 text-lg font-semibold tabular-nums">{formatPaise(value)}</div>
         <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-muted">
-          <div className={cn('h-full rounded-full', barClass)} style={{ width: `${share * 100}%` }} />
+          <div className="h-full rounded-full" style={{ width: `${share * 100}%`, backgroundColor: color }} />
         </div>
-        {hint && <p className="mt-1.5 text-xs text-muted-foreground">{hint}</p>}
+        {isDefault && (
+          <p className="mt-1.5 text-xs text-muted-foreground">Untagged spend (the default bucket)</p>
+        )}
       </CardContent>
     </Card>
   )
 }
 
 /**
- * Two-segment horizontal bar showing a row's Normal:Special split. The overall bar length is scaled
- * by `widthFraction` (this row's typed total relative to the largest row), so bigger categories read
- * as longer bars; the internal split shows how much of that is Normal (emerald) vs Special (amber).
+ * Horizontal bar showing how a category row splits across contexts. The overall bar length is scaled
+ * by `widthFraction` (this row's total relative to the largest row), so bigger categories read as
+ * longer bars; the internal segments show each context's share, colored to match the column dots.
  */
-function SplitBar({
-  normal,
-  special,
+function ContextSplitBar({
+  contexts,
+  byContext,
+  total,
   widthFraction,
 }: {
-  normal: number
-  special: number
+  contexts: string[]
+  byContext: Record<string, number>
+  total: number
   widthFraction: number
 }) {
-  const total = normal + special
   if (total <= 0) {
-    return <div className="h-2 w-full rounded-full bg-muted" title="Nothing typed yet" />
+    return <div className="h-2 w-full rounded-full bg-muted" title="No spend" />
   }
-  const normalPct = (normal / total) * 100
-  const specialPct = (special / total) * 100
+  const title = contexts
+    .filter((ctx) => (byContext[ctx] ?? 0) > 0)
+    .map((ctx) => `${ctx} ${formatPaise(byContext[ctx] ?? 0)}`)
+    .join(' · ')
   return (
     <div className="h-2 w-full rounded-full bg-muted">
       <div
         className="flex h-full overflow-hidden rounded-full"
         style={{ width: `${Math.max(6, widthFraction * 100)}%` }}
-        title={`Normal ${formatPaise(normal)} · Special ${formatPaise(special)}`}
+        title={title}
       >
-        <div className="h-full bg-emerald-500" style={{ width: `${normalPct}%` }} />
-        <div className="h-full bg-amber-500" style={{ width: `${specialPct}%` }} />
+        {contexts.map((ctx, i) => {
+          const val = byContext[ctx] ?? 0
+          if (val <= 0) return null
+          return (
+            <div
+              key={ctx}
+              className="h-full"
+              style={{ width: `${(val / total) * 100}%`, backgroundColor: contextColor(i) }}
+            />
+          )
+        })}
       </div>
     </div>
   )

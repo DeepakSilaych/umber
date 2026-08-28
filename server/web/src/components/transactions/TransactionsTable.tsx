@@ -3,7 +3,7 @@ import { flexRender, getCoreRowModel, useReactTable, type ColumnDef } from '@tan
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import CategorySelect from '@/components/CategorySelect'
 import SubcategoryCell from '@/components/transactions/SubcategoryCell'
-import SpendTypeCell from '@/components/transactions/SpendTypeCell'
+import ContextCell from '@/components/transactions/ContextCell'
 import { DirectionBadge, NeedsReviewBadge } from '@/components/Badges'
 import { formatDateTime, formatPaise } from '@/lib/format'
 import type { TxnOut } from '@/lib/types'
@@ -13,9 +13,11 @@ interface TransactionsTableProps {
   loading: boolean
   /** Existing sub-category values offered as inline datalist suggestions. */
   subcategorySuggestions: string[]
+  /** Existing context (trip) names offered as inline datalist suggestions. */
+  contextSuggestions: string[]
   onCategoryChange: (txn: TxnOut, category: string) => void
   onSubcategoryChange: (txn: TxnOut, subcategory: string) => void
-  onSpendTypeChange: (txn: TxnOut, spendType: string) => void
+  onContextChange: (txn: TxnOut, context: string) => void
 }
 
 /**
@@ -27,9 +29,10 @@ export default function TransactionsTable({
   items,
   loading,
   subcategorySuggestions,
+  contextSuggestions,
   onCategoryChange,
   onSubcategoryChange,
-  onSpendTypeChange,
+  onContextChange,
 }: TransactionsTableProps) {
   const columns = useMemo<ColumnDef<TxnOut>[]>(
     () => [
@@ -81,9 +84,11 @@ export default function TransactionsTable({
         ),
       },
       {
-        id: 'spend_type',
-        header: 'Type',
-        cell: ({ row }) => <SpendTypeCell txn={row.original} onCommit={onSpendTypeChange} />,
+        id: 'context',
+        header: 'Context',
+        cell: ({ row }) => (
+          <ContextCell txn={row.original} suggestions={contextSuggestions} onCommit={onContextChange} />
+        ),
       },
       {
         id: 'status',
@@ -91,7 +96,7 @@ export default function TransactionsTable({
         cell: ({ row }) => <NeedsReviewBadge needsReview={row.original.needs_review} />,
       },
     ],
-    [subcategorySuggestions, onCategoryChange, onSubcategoryChange, onSpendTypeChange],
+    [subcategorySuggestions, contextSuggestions, onCategoryChange, onSubcategoryChange, onContextChange],
   )
 
   const table = useReactTable({

@@ -3,11 +3,8 @@
 
 export type Direction = 'DEBIT' | 'CREDIT'
 
-/** Routine everyday spend vs a special/big-budget one-off. `null` = not yet typed. */
-export type SpendType = 'NORMAL' | 'SPECIAL'
-
 // The list/detail/patch transaction endpoints return TxnOutDetailed server-side, which is TxnOut
-// plus the dashboard-only `subcategory`/`spend_type` fields — so those are folded in here.
+// plus the dashboard-only `subcategory`/`context` fields — so those are folded in here.
 export interface TxnOut {
   client_id: string
   device_id: string
@@ -25,7 +22,8 @@ export interface TxnOut {
   category_source: string
   needs_review: boolean
   subcategory: string | null
-  spend_type: SpendType | null
+  /** Free-text trip/occasion grouping. `null` = the default "daily expense". */
+  context: string | null
   updated_at: number
   created_at: number
 }
@@ -41,8 +39,8 @@ export interface TransactionPatch {
   needs_review?: boolean
   /** Free-form detail under the category. Empty string clears it server-side. */
   subcategory?: string
-  /** "NORMAL" | "SPECIAL". Empty string clears it server-side. */
-  spend_type?: string
+  /** Free-text trip/occasion grouping. Empty string clears it → back to daily-expense default. */
+  context?: string
 }
 
 export interface TransactionCreate {
@@ -194,22 +192,42 @@ export type BudgetBucketPatch = Partial<BudgetBucketInput>
 
 export type BudgetPeriod = 'this_month' | 'last_month' | 'this_year'
 
-// --- Distribution (category × normal/special) -------------------------------
+// --- Distribution (category × context) --------------------------------------
+
+// The literal context key the server uses for the NULL/default bucket (daily-expense).
+export const DAILY_EXPENSE_CONTEXT = 'daily expense'
 
 export interface DistributionRow {
   category: string
-  normal_paise: number
-  special_paise: number
+  by_context: Record<string, number> // context name -> paise for this category
+  total_paise: number
 }
 
 export interface DistributionResponse {
   period: string
   from_ms: number
   to_ms: number
-  normal_total_paise: number
-  special_total_paise: number
-  untyped_total_paise: number // spend on rows with no spend_type assigned yet
-  rows: DistributionRow[] // desc by (normal + special)
+  // Ordered daily-expense-first, then trips by total desc. Column order for the matrix.
+  contexts: string[]
+  totals_by_context: Record<string, number> // context name -> total paise across all categories
+  rows: DistributionRow[] // desc by total_paise
+}
+
+// --- Context tagging (trips) ------------------------------------------------
+
+export interface TagContextRequest {
+  context: string
+  from_ms: number
+  to_ms: number
+  /** Scope to these top-level categories; empty/omitted = all categories. */
+  categories?: string[]
+  /** Only tag transactions with no context yet (default true server-side). */
+  only_untagged?: boolean
+}
+
+export interface TagContextResponse {
+  context: string
+  updated: number
 }
 
 // --- Sub-category breakdown -------------------------------------------------
